@@ -858,7 +858,7 @@ FXVM_Type type_check_binary(FXVM_Compiler *compiler, FXVM_Ast *ast)
                     invalid_operand_types(compiler, ast->binary.op, type_left, type_right);
                 }
             }
-            return type_left;
+            return ast->type = type_left;
         }
     case FXAST_OP_ASSIGN:
         return type_check_assign(compiler, ast);
@@ -999,9 +999,20 @@ enum FXVM_ILOp
     FXIL_MUL,
     FXIL_DIV,
 
+    FXIL_RCP,
+    FXIL_RSQRT,
     FXIL_SQRT,
     FXIL_SIN,
     FXIL_COS,
+    FXIL_EXP,
+    FXIL_EXP2,
+    FXIL_EXP10,
+    FXIL_ABS,
+    FXIL_MIN,
+    FXIL_MAX,
+    FXIL_CLAMP01,
+    FXIL_CLAMP,
+    FXIL_INTERP,
 };
 
 struct FXVM_ILInstrInfo
@@ -1015,15 +1026,26 @@ struct FXVM_ILInstrInfo
 FXVM_ILInstrInfo il_instr_info[] = {
     [FXIL_LOAD_CONST] = {"FXIL_LOAD_CONST", 1, 1, 0},
     [FXIL_LOAD_INPUT] = {"FXIL_LOAD_INPUT", 1, 0, 1},
-    [FXIL_MOV] = {"FXIL_MOV", 2, 0, 0},
-    [FXIL_NEG] = {"FXIL_NEG", 2, 0, 0},
-    [FXIL_ADD] = {"FXIL_ADD", 3, 0, 0},
-    [FXIL_SUB] = {"FXIL_SUB", 3, 0, 0},
-    [FXIL_MUL] = {"FXIL_MUL", 3, 0, 0},
-    [FXIL_DIV] = {"FXIL_DIV", 3, 0, 0},
-    [FXIL_SQRT] = {"FXIL_SQRT", 2, 0, 0},
-    [FXIL_SIN] = {"FXIL_SIN", 2, 0, 0},
-    [FXIL_COS] = {"FXIL_COS", 2, 0, 0},
+    [FXIL_MOV] =        {"FXIL_MOV", 2, 0, 0},
+    [FXIL_NEG] =        {"FXIL_NEG", 2, 0, 0},
+    [FXIL_ADD] =        {"FXIL_ADD", 3, 0, 0},
+    [FXIL_SUB] =        {"FXIL_SUB", 3, 0, 0},
+    [FXIL_MUL] =        {"FXIL_MUL", 3, 0, 0},
+    [FXIL_DIV] =        {"FXIL_DIV", 3, 0, 0},
+    [FXIL_RCP] =        {"FXIL_RCP", 2, 0, 0},
+    [FXIL_RSQRT] =      {"FXIL_RSQRT", 2, 0, 0},
+    [FXIL_SQRT] =       {"FXIL_SQRT", 2, 0, 0},
+    [FXIL_SIN] =        {"FXIL_SIN", 2, 0, 0},
+    [FXIL_COS] =        {"FXIL_COS", 2, 0, 0},
+    [FXIL_EXP] =        {"FXIL_EXP", 2, 0, 0},
+    [FXIL_EXP2] =       {"FXIL_EXP2", 2, 0, 0},
+    [FXIL_EXP10] =      {"FXIL_EXP10", 2, 0, 0},
+    [FXIL_ABS] =        {"FXIL_ABS", 2, 0, 0},
+    [FXIL_MIN] =        {"FXIL_MIN", 2, 0, 0},
+    [FXIL_MAX] =        {"FXIL_MAX", 2, 0, 0},
+    [FXIL_CLAMP01] =    {"FXIL_CLAMP01", 2, 0, 0},
+    [FXIL_CLAMP] =      {"FXIL_CLAMP", 2, 0, 0},
+    [FXIL_INTERP] =     {"FXIL_INTERP", 2, 0, 0},
 };
 
 const char* il_op_to_string(FXVM_ILOp op)
@@ -1223,7 +1245,6 @@ FXIL_Reg generate_variable(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_As
     (void)compiler;
     (void)ctx;
     (void)expr;
-    (void)sym_index;
     //assert(sym_index != -1)
     int variable_reg = compiler->symbols.additional_data[sym_index].variable_reg;
     return { variable_reg };
@@ -1271,29 +1292,56 @@ FXIL_Reg generate_number(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast 
     return result;
 }
 
-FXIL_Reg emit_sqrt(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+template <FXVM_ILOp OP>
+FXIL_Reg emit_single_param_func(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 {
     FXIL_Reg result = new_il_reg(ctx);
     FXIL_Reg param = generate_expr(compiler, ctx, call->call.params.nodes[0]);
-    push_il(ctx, FXIL_SQRT, result, param);
+    push_il(ctx, OP, result, param);
     return result;
 }
+
+FXIL_Reg emit_rcp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_RCP>(compiler, ctx, call); }
+
+FXIL_Reg emit_rsqrt(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_RSQRT>(compiler, ctx, call); }
+
+FXIL_Reg emit_sqrt(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_SQRT>(compiler, ctx, call); }
 
 FXIL_Reg emit_sin(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
-{
-    FXIL_Reg result = new_il_reg(ctx);
-    FXIL_Reg param = generate_expr(compiler, ctx, call->call.params.nodes[0]);
-    push_il(ctx, FXIL_SIN, result, param);
-    return result;
-}
+{ return emit_single_param_func<FXIL_SIN>(compiler, ctx, call); }
 
 FXIL_Reg emit_cos(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
-{
-    FXIL_Reg result = new_il_reg(ctx);
-    FXIL_Reg param = generate_expr(compiler, ctx, call->call.params.nodes[0]);
-    push_il(ctx, FXIL_COS, result, param);
-    return result;
-}
+{ return emit_single_param_func<FXIL_COS>(compiler, ctx, call); }
+
+FXIL_Reg emit_exp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_EXP>(compiler, ctx, call); }
+
+FXIL_Reg emit_exp2(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_EXP2>(compiler, ctx, call); }
+
+FXIL_Reg emit_exp10(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_EXP10>(compiler, ctx, call); }
+
+FXIL_Reg emit_abs(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_ABS>(compiler, ctx, call); }
+
+FXIL_Reg emit_min(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_MIN>(compiler, ctx, call); }
+
+FXIL_Reg emit_max(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_MAX>(compiler, ctx, call); }
+
+FXIL_Reg emit_clamp01(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_CLAMP01>(compiler, ctx, call); }
+
+FXIL_Reg emit_clamp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_CLAMP>(compiler, ctx, call); }
+
+FXIL_Reg emit_lerp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_INTERP>(compiler, ctx, call); }
 
 FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
 {
@@ -1303,9 +1351,20 @@ FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_A
         FXIL_Reg (*emit)(FXVM_Compiler*, FXVM_ILContext*, FXVM_Ast*);
     };
     const BuiltinInfo builtins[] = {
+        {"rcp", emit_rcp},
+        {"rsqrt", emit_rsqrt},
         {"sqrt", emit_sqrt},
         {"sin", emit_sin},
         {"cos", emit_cos},
+        {"exp", emit_exp},
+        {"exp2", emit_exp2},
+        {"exp10", emit_exp10},
+        {"abs", emit_abs},
+        {"min", emit_min},
+        {"max", emit_max},
+        {"clamp01", emit_clamp01},
+        {"clamp", emit_clamp},
+        {"lerp", emit_lerp},
     };
     const int builtin_num = sizeof(builtins) / sizeof(BuiltinInfo);
 
