@@ -16,6 +16,7 @@ enum FXVM_SymbolType
 struct FXVM_SymbolAdditionalData
 {
     union {
+        int variable_reg;
         float constant[4];
         int input_index;
     };
@@ -32,6 +33,7 @@ struct FXVM_Symbols
     } *names;
 
     FXVM_Type *types;
+    FXVM_SymbolType *sym_types;
 
     enum { MAX_PARAMETER_NUM = 4 };
     struct FunctionType
@@ -41,10 +43,9 @@ struct FXVM_Symbols
         FXVM_Type parameter_types[MAX_PARAMETER_NUM];
     } *function_types;
 
-    int input_index;
     FXVM_SymbolAdditionalData *additional_data;
 
-    FXVM_SymbolType *sym_types;
+    int input_index;
 };
 
 void ensure_symbol_fits(FXVM_Symbols *syms)
@@ -54,9 +55,9 @@ void ensure_symbol_fits(FXVM_Symbols *syms)
         int new_cap = syms->symbol_cap + 32;
         syms->names = (FXVM_Symbols::SymbolName*)realloc(syms->names, new_cap * sizeof(FXVM_Symbols::SymbolName));
         syms->types = (FXVM_Type*)realloc(syms->types, new_cap * sizeof(FXVM_Type));
+        syms->sym_types = (FXVM_SymbolType*)realloc(syms->sym_types, new_cap * sizeof(FXVM_SymbolType));
         syms->function_types = (FXVM_Symbols::FunctionType*)realloc(syms->function_types, new_cap * sizeof(FXVM_Symbols::FunctionType));
         syms->additional_data = (FXVM_SymbolAdditionalData*)realloc(syms->additional_data, new_cap * sizeof(FXVM_SymbolAdditionalData));
-        syms->sym_types = (FXVM_SymbolType*)realloc(syms->sym_types, new_cap * sizeof(FXVM_SymbolType));
         syms->symbol_cap = new_cap;
     }
 }

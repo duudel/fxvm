@@ -1180,9 +1180,23 @@ FXIL_Reg generate_div(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *ad
     return result;
 }
 
+FXIL_Reg generate_variable_target(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    const char *sym_start = expr->variable.token->start;
+    const char *sym_end = expr->variable.token->end;
+    int sym_index = symbols_find(&compiler->symbols, sym_start, sym_end);
+    if (sym_index == -1)
+    {
+        sym_index = push_symbol(&compiler->symbols, sym_start, sym_end, expr->type);
+    }
+    compiler->symbols.additional_data[sym_index].variable_reg = result.index;
+    return result;
+}
+
 FXIL_Reg generate_assign(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *assign)
 {
-    FXIL_Reg left = generate_expr(compiler, ctx, assign->binary.left);
+    FXIL_Reg left = generate_variable_target(compiler, ctx, assign->binary.left);
     FXIL_Reg right = generate_expr(compiler, ctx, assign->binary.right);
     push_il(ctx, FXIL_MOV, left, right);
     return left;
@@ -1204,18 +1218,15 @@ FXIL_Reg generate_binary_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM
     return { -1 };
 }
 
-FXIL_Reg use_the_same_reg_or_make_new()
-{
-    return {};
-}
-
 FXIL_Reg generate_variable(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr, int sym_index)
 {
     (void)compiler;
     (void)ctx;
     (void)expr;
     (void)sym_index;
-    return use_the_same_reg_or_make_new();
+    //assert(sym_index != -1)
+    int variable_reg = compiler->symbols.additional_data[sym_index].variable_reg;
+    return { variable_reg };
 }
 
 FXIL_Reg generate_constant(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr, int sym_index)
@@ -1242,14 +1253,14 @@ FXIL_Reg generate_variable_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FX
     int sym_index = symbols_find(&compiler->symbols, expr->variable.token->start, expr->variable.token->end);
     switch (compiler->symbols.sym_types[sym_index])
     {
-    case FXSYM_Variable: return generate_variable(compiler, ctx, expr, sym_index);
+    case FXSYM_Variable:        return generate_variable(compiler, ctx, expr, sym_index);
     case FXSYM_BuiltinConstant: return generate_constant(compiler, ctx, expr, sym_index);
-    case FXSYM_InputVariable: return generate_input_variable(compiler, ctx, expr, sym_index);
+    case FXSYM_InputVariable:   return generate_input_variable(compiler, ctx, expr, sym_index);
     case FXSYM_BuiltinFunction:
         // ICE
         break;
     }
-    return use_the_same_reg_or_make_new();
+    return { -1 };
 }
 
 FXIL_Reg generate_number(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
