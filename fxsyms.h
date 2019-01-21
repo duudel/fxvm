@@ -13,6 +13,14 @@ enum FXVM_SymbolType
     FXSYM_BuiltinFunction,
 };
 
+struct FXVM_SymbolAdditionalData
+{
+    union {
+        float constant[4];
+        int input_index;
+    };
+};
+
 struct FXVM_Symbols
 {
     int symbol_num;
@@ -33,10 +41,8 @@ struct FXVM_Symbols
         FXVM_Type parameter_types[MAX_PARAMETER_NUM];
     } *function_types;
 
-    struct Constant
-    {
-        float v[4];
-    } *constants;
+    int input_index;
+    FXVM_SymbolAdditionalData *additional_data;
 
     FXVM_SymbolType *sym_types;
 };
@@ -49,7 +55,7 @@ void ensure_symbol_fits(FXVM_Symbols *syms)
         syms->names = (FXVM_Symbols::SymbolName*)realloc(syms->names, new_cap * sizeof(FXVM_Symbols::SymbolName));
         syms->types = (FXVM_Type*)realloc(syms->types, new_cap * sizeof(FXVM_Type));
         syms->function_types = (FXVM_Symbols::FunctionType*)realloc(syms->function_types, new_cap * sizeof(FXVM_Symbols::FunctionType));
-        syms->constants = (FXVM_Symbols::Constant*)realloc(syms->constants, new_cap * sizeof(FXVM_Symbols::Constant));
+        syms->additional_data = (FXVM_SymbolAdditionalData*)realloc(syms->additional_data, new_cap * sizeof(FXVM_SymbolAdditionalData));
         syms->sym_types = (FXVM_SymbolType*)realloc(syms->sym_types, new_cap * sizeof(FXVM_SymbolType));
         syms->symbol_cap = new_cap;
     }
@@ -62,7 +68,7 @@ int push_symbol(FXVM_Symbols *syms, const char *sym, const char *sym_end, FXVM_T
     syms->names[i] = { sym, sym_end };
     syms->types[i] = type;
     syms->function_types[i] = { };
-    syms->constants[i] = { };
+    syms->additional_data[i] = { };
     syms->sym_types[i] = FXSYM_Variable;
     syms->symbol_num = i + 1;
     return i;
@@ -79,7 +85,7 @@ int push_symbol_builtin_constant(FXVM_Symbols *syms, const char *sym, const char
     case 4: sym_index = push_symbol(syms, sym, sym_end, FXTYP_F4); break;
     }
     // TODO: assert sym_index != -1
-    memcpy(&syms->constants[sym_index], value, width * sizeof(float));
+    memcpy(&syms->additional_data[sym_index].constant, value, width * sizeof(float));
     syms->sym_types[sym_index] = FXSYM_BuiltinConstant;
     return sym_index;
 }

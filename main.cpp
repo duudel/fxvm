@@ -216,19 +216,47 @@ void print_instr(FXVM_ILInstr *instr)
     switch (instr->op)
     {
     case FXIL_LOAD_CONST:
-        printf("%s r%d <- [%.6f %.6f %.6f %.6f]\n", il_op_to_string(instr->op),
+        printf("%-16s r%d <- [%.6f %.6f %.6f %.6f]\n", il_op_to_string(instr->op),
                 instr->constant_load.target.index,
                 instr->constant_load.v[0],
                 instr->constant_load.v[1],
                 instr->constant_load.v[2],
                 instr->constant_load.v[4]);
         break;
-    default:
-        printf("%s r%d <- r%d r%d\n", il_op_to_string(instr->op),
-                instr->operands.ops[0].index,
-                instr->operands.ops[1].index,
-                instr->operands.ops[2].index);
+    case FXIL_LOAD_INPUT:
+        printf("%-16s r%d <- input[%d]\n", il_op_to_string(instr->op),
+                instr->input_load.target.index,
+                instr->input_load.input_index);
         break;
+    default:
+        switch (il_instr_info[instr->op].operand_num)
+        {
+        case 0:
+            printf("%-16s\n", il_op_to_string(instr->op));
+            break;
+        case 1:
+            printf("%-16s r%d\n", il_op_to_string(instr->op),
+                    instr->operands.ops[0].index);
+            break;
+        case 2:
+            printf("%-16s r%d <- r%d\n", il_op_to_string(instr->op),
+                    instr->operands.ops[0].index,
+                    instr->operands.ops[1].index);
+            break;
+        case 3:
+            printf("%-16s r%d <- r%d r%d\n", il_op_to_string(instr->op),
+                    instr->operands.ops[0].index,
+                    instr->operands.ops[1].index,
+                    instr->operands.ops[2].index);
+            break;
+        case 4:
+            printf("%-16s r%d <- r%d r%d r%d\n", il_op_to_string(instr->op),
+                    instr->operands.ops[0].index,
+                    instr->operands.ops[1].index,
+                    instr->operands.ops[2].index,
+                    instr->operands.ops[3].index);
+            break;
+        }
     }
 }
 

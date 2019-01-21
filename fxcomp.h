@@ -991,27 +991,44 @@ bool type_check(FXVM_Compiler *compiler)
 enum FXVM_ILOp
 {
     FXIL_LOAD_CONST,
+    FXIL_LOAD_INPUT,
     FXIL_MOV,
     FXIL_NEG,
     FXIL_ADD,
     FXIL_SUB,
     FXIL_MUL,
     FXIL_DIV,
+
+    FXIL_SQRT,
+    FXIL_SIN,
+    FXIL_COS,
+};
+
+struct FXVM_ILInstrInfo
+{
+    const char *name;
+    int operand_num;
+    int const_operand_num;
+    int immediate;
+};
+
+FXVM_ILInstrInfo il_instr_info[] = {
+    [FXIL_LOAD_CONST] = {"FXIL_LOAD_CONST", 1, 1, 0},
+    [FXIL_LOAD_INPUT] = {"FXIL_LOAD_INPUT", 1, 0, 1},
+    [FXIL_MOV] = {"FXIL_MOV", 2, 0, 0},
+    [FXIL_NEG] = {"FXIL_NEG", 2, 0, 0},
+    [FXIL_ADD] = {"FXIL_ADD", 3, 0, 0},
+    [FXIL_SUB] = {"FXIL_SUB", 3, 0, 0},
+    [FXIL_MUL] = {"FXIL_MUL", 3, 0, 0},
+    [FXIL_DIV] = {"FXIL_DIV", 3, 0, 0},
+    [FXIL_SQRT] = {"FXIL_SQRT", 2, 0, 0},
+    [FXIL_SIN] = {"FXIL_SIN", 2, 0, 0},
+    [FXIL_COS] = {"FXIL_COS", 2, 0, 0},
 };
 
 const char* il_op_to_string(FXVM_ILOp op)
 {
-    switch (op)
-    {
-    case FXIL_LOAD_CONST: return "FXIL_LOAD_CONST";
-    case FXIL_MOV: return "FXIL_MOV";
-    case FXIL_NEG: return "FXIL_NEG";
-    case FXIL_ADD: return "FXIL_ADD";
-    case FXIL_SUB: return "FXIL_SUB";
-    case FXIL_MUL: return "FXIL_MUL";
-    case FXIL_DIV: return "FXIL_DIV";
-    }
-    return nullptr;
+    return il_instr_info[op].name;
 }
 
 struct FXIL_Reg
@@ -1028,12 +1045,18 @@ struct FXIL_ConstantLoad {
     float v[4];
 };
 
+struct FXIL_InputLoad {
+    FXIL_Reg target;
+    int input_index;
+};
+
 struct FXVM_ILInstr
 {
     FXVM_ILOp op;
     union {
         FXIL_Operands operands;
         FXIL_ConstantLoad constant_load;
+        FXIL_InputLoad input_load;
     };
 };
 
@@ -1072,32 +1095,48 @@ void push_il_load_const(FXVM_ILContext *ctx, FXIL_Reg target, float v)
     ctx->instr_num = i + 1;
 }
 
+void push_il_load_const(FXVM_ILContext *ctx, FXIL_Reg target, float *v)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_CONST, .constant_load = {.target = target, v[0], v[1], v[2], v[3] } };
+    ctx->instr_num = i + 1;
+}
+
+void push_il_load_input(FXVM_ILContext *ctx, FXIL_Reg target, int input_index)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_INPUT, .input_load = {.target = target, input_index} };
+    ctx->instr_num = i + 1;
+}
+
 FXIL_Reg new_il_reg(FXVM_ILContext *ctx)
 {
     return { ctx->reg_index++ };
 }
 
-FXIL_Reg generate_expr(FXVM_ILContext *ctx, FXVM_Ast *expr);
+FXIL_Reg generate_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr);
 
-FXIL_Reg generate_plus(FXVM_ILContext *ctx, FXVM_Ast *expr)
+FXIL_Reg generate_plus(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
 {
-    return generate_expr(ctx, expr->unary.operand);
+    return generate_expr(compiler, ctx, expr->unary.operand);
 }
 
-FXIL_Reg generate_negate(FXVM_ILContext *ctx, FXVM_Ast *expr)
+FXIL_Reg generate_negate(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
 {
-    FXIL_Reg operand = generate_expr(ctx, expr->unary.operand);
+    FXIL_Reg operand = generate_expr(compiler, ctx, expr->unary.operand);
     FXIL_Reg result = new_il_reg(ctx);
     push_il(ctx, FXIL_NEG, result, operand);
     return result;
 }
 
-FXIL_Reg generate_unary_expr(FXVM_ILContext *ctx, FXVM_Ast *expr)
+FXIL_Reg generate_unary_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
 {
     switch (expr->unary.op)
     {
-    case FXAST_OP_PLUS:  return generate_plus(ctx, expr);
-    case FXAST_OP_MINUS: return generate_negate(ctx, expr);
+    case FXAST_OP_PLUS:  return generate_plus(compiler, ctx, expr);
+    case FXAST_OP_MINUS: return generate_negate(compiler, ctx, expr);
         default:
         // ICE
         break;
@@ -1105,59 +1144,59 @@ FXIL_Reg generate_unary_expr(FXVM_ILContext *ctx, FXVM_Ast *expr)
     return { -1 };
 }
 
-FXIL_Reg generate_add(FXVM_ILContext *ctx, FXVM_Ast *add)
+FXIL_Reg generate_add(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *add)
 {
-    FXIL_Reg left = generate_expr(ctx, add->binary.left);
-    FXIL_Reg right = generate_expr(ctx, add->binary.right);
+    FXIL_Reg left = generate_expr(compiler, ctx, add->binary.left);
+    FXIL_Reg right = generate_expr(compiler, ctx, add->binary.right);
     FXIL_Reg result = new_il_reg(ctx);
     push_il(ctx, FXIL_ADD, result, left, right);
     return result;
 }
 
-FXIL_Reg generate_sub(FXVM_ILContext *ctx, FXVM_Ast *add)
+FXIL_Reg generate_sub(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *add)
 {
-    FXIL_Reg left = generate_expr(ctx, add->binary.left);
-    FXIL_Reg right = generate_expr(ctx, add->binary.right);
+    FXIL_Reg left = generate_expr(compiler, ctx, add->binary.left);
+    FXIL_Reg right = generate_expr(compiler, ctx, add->binary.right);
     FXIL_Reg result = new_il_reg(ctx);
     push_il(ctx, FXIL_SUB, result, left, right);
     return result;
 }
 
-FXIL_Reg generate_mul(FXVM_ILContext *ctx, FXVM_Ast *add)
+FXIL_Reg generate_mul(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *add)
 {
-    FXIL_Reg left = generate_expr(ctx, add->binary.left);
-    FXIL_Reg right = generate_expr(ctx, add->binary.right);
+    FXIL_Reg left = generate_expr(compiler, ctx, add->binary.left);
+    FXIL_Reg right = generate_expr(compiler, ctx, add->binary.right);
     FXIL_Reg result = new_il_reg(ctx);
     push_il(ctx, FXIL_MUL, result, left, right);
     return result;
 }
 
-FXIL_Reg generate_div(FXVM_ILContext *ctx, FXVM_Ast *add)
+FXIL_Reg generate_div(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *add)
 {
-    FXIL_Reg left = generate_expr(ctx, add->binary.left);
-    FXIL_Reg right = generate_expr(ctx, add->binary.right);
+    FXIL_Reg left = generate_expr(compiler, ctx, add->binary.left);
+    FXIL_Reg right = generate_expr(compiler, ctx, add->binary.right);
     FXIL_Reg result = new_il_reg(ctx);
     push_il(ctx, FXIL_DIV, result, left, right);
     return result;
 }
 
-FXIL_Reg generate_assign(FXVM_ILContext *ctx, FXVM_Ast *assign)
+FXIL_Reg generate_assign(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *assign)
 {
-    FXIL_Reg left = generate_expr(ctx, assign->binary.left);
-    FXIL_Reg right = generate_expr(ctx, assign->binary.right);
+    FXIL_Reg left = generate_expr(compiler, ctx, assign->binary.left);
+    FXIL_Reg right = generate_expr(compiler, ctx, assign->binary.right);
     push_il(ctx, FXIL_MOV, left, right);
     return left;
 }
 
-FXIL_Reg generate_binary_expr(FXVM_ILContext *ctx, FXVM_Ast *expr)
+FXIL_Reg generate_binary_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
 {
     switch (expr->binary.op)
     {
-    case FXAST_OP_ADD: return generate_add(ctx, expr);
-    case FXAST_OP_SUB: return generate_sub(ctx, expr);
-    case FXAST_OP_MUL: return generate_mul(ctx, expr);
-    case FXAST_OP_DIV: return generate_div(ctx, expr);
-    case FXAST_OP_ASSIGN: return generate_assign(ctx, expr);
+    case FXAST_OP_ADD: return generate_add(compiler, ctx, expr);
+    case FXAST_OP_SUB: return generate_sub(compiler, ctx, expr);
+    case FXAST_OP_MUL: return generate_mul(compiler, ctx, expr);
+    case FXAST_OP_DIV: return generate_div(compiler, ctx, expr);
+    case FXAST_OP_ASSIGN: return generate_assign(compiler, ctx, expr);
     default:
         // ICE
         break;
@@ -1170,37 +1209,118 @@ FXIL_Reg use_the_same_reg_or_make_new()
     return {};
 }
 
-FXIL_Reg generate_variable(FXVM_ILContext *ctx, FXVM_Ast *variable)
+FXIL_Reg generate_variable(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr, int sym_index)
 {
-    // TODO: implement
+    (void)compiler;
     (void)ctx;
-    (void)variable;
+    (void)expr;
+    (void)sym_index;
     return use_the_same_reg_or_make_new();
 }
 
-FXIL_Reg generate_number(FXVM_ILContext *ctx, FXVM_Ast *number)
+FXIL_Reg generate_constant(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr, int sym_index)
 {
+    (void)compiler;
+    (void)expr;
+    FXIL_Reg target = new_il_reg(ctx);
+    float *v = compiler->symbols.additional_data[sym_index].constant; // TODO: here we assume constant of 4-wide
+    push_il_load_const(ctx, target, v);
+    return target;
+}
+
+FXIL_Reg generate_input_variable(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr, int sym_index)
+{
+    (void)expr;
+    FXIL_Reg target = new_il_reg(ctx);
+    int input_index = compiler->symbols.additional_data[sym_index].input_index;
+    push_il_load_input(ctx, target, input_index);
+    return target;
+}
+
+FXIL_Reg generate_variable_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
+{
+    int sym_index = symbols_find(&compiler->symbols, expr->variable.token->start, expr->variable.token->end);
+    switch (compiler->symbols.sym_types[sym_index])
+    {
+    case FXSYM_Variable: return generate_variable(compiler, ctx, expr, sym_index);
+    case FXSYM_BuiltinConstant: return generate_constant(compiler, ctx, expr, sym_index);
+    case FXSYM_InputVariable: return generate_input_variable(compiler, ctx, expr, sym_index);
+    case FXSYM_BuiltinFunction:
+        // ICE
+        break;
+    }
+    return use_the_same_reg_or_make_new();
+}
+
+FXIL_Reg generate_number(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
+{
+    (void)compiler;
     FXIL_Reg result = new_il_reg(ctx);
-    push_il_load_const(ctx, result, number->number.value);
+    push_il_load_const(ctx, result, expr->number.value);
     return result;
 }
 
-FXIL_Reg generate_call_expr(FXVM_ILContext *ctx, FXVM_Ast *call)
+FXIL_Reg emit_sqrt(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 {
-    // TODO: implement
-    (void)call;
+    FXIL_Reg result = new_il_reg(ctx);
+    FXIL_Reg param = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    push_il(ctx, FXIL_SQRT, result, param);
+    return result;
+}
+
+FXIL_Reg emit_sin(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXIL_Reg param = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    push_il(ctx, FXIL_SIN, result, param);
+    return result;
+}
+
+FXIL_Reg emit_cos(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXIL_Reg param = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    push_il(ctx, FXIL_COS, result, param);
+    return result;
+}
+
+FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
+{
+    struct BuiltinInfo
+    {
+        const char *name;
+        FXIL_Reg (*emit)(FXVM_Compiler*, FXVM_ILContext*, FXVM_Ast*);
+    };
+    const BuiltinInfo builtins[] = {
+        {"sqrt", emit_sqrt},
+        {"sin", emit_sin},
+        {"cos", emit_cos},
+    };
+    const int builtin_num = sizeof(builtins) / sizeof(BuiltinInfo);
+
+    const char *func_name = expr->call.token->start;
+    const char *func_name_end = expr->call.token->end;
+    size_t func_name_len = func_name_end - func_name;
+    for (int i = 0; i < builtin_num; i++)
+    {
+        if (string_eq(func_name, func_name_len, builtins[i].name, strlen(builtins[i].name)))
+        {
+            return builtins[i].emit(compiler, ctx, expr);
+        }
+    }
+    // ICE
     return new_il_reg(ctx);
 }
 
-FXIL_Reg generate_expr(FXVM_ILContext *ctx, FXVM_Ast *node)
+FXIL_Reg generate_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *node)
 {
     switch (node->kind)
     {
-    case FXAST_EXPR_NUMBER:     return generate_number(ctx, node);
-    case FXAST_EXPR_VARIABLE:   return generate_variable(ctx, node);
-    case FXAST_EXPR_UNARY:      return generate_unary_expr(ctx, node);
-    case FXAST_EXPR_BINARY:     return generate_binary_expr(ctx, node);
-    case FXAST_EXPR_CALL:       return generate_call_expr(ctx, node);
+    case FXAST_EXPR_NUMBER:     return generate_number(compiler, ctx, node);
+    case FXAST_EXPR_VARIABLE:   return generate_variable_expr(compiler, ctx, node);
+    case FXAST_EXPR_UNARY:      return generate_unary_expr(compiler, ctx, node);
+    case FXAST_EXPR_BINARY:     return generate_binary_expr(compiler, ctx, node);
+    case FXAST_EXPR_CALL:       return generate_call_expr(compiler, ctx, node);
     default:
         // ICE
         break;
@@ -1213,7 +1333,7 @@ bool generate_il(FXVM_Compiler *compiler)
     auto root = compiler->ast->root;
     for (int i = 0; i < root.node_num; i++)
     {
-        generate_expr(&compiler->il_context, root.nodes[i]);
+        generate_expr(compiler, &compiler->il_context, root.nodes[i]);
     }
     return true;
 }
@@ -1245,6 +1365,7 @@ void set_function_parameter_type(FXVM_Compiler *compiler, int sym_index, int par
 void register_input_variable(FXVM_Compiler *compiler, const char *name, FXVM_Type type)
 {
     int sym_index = push_symbol(&compiler->symbols, name, name + strlen(name), type);
+    compiler->symbols.additional_data[sym_index].input_index = compiler->symbols.input_index++;
     compiler->symbols.sym_types[sym_index] = FXSYM_InputVariable;
 }
 
