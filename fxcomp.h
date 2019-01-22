@@ -739,6 +739,7 @@ const char* type_to_string(FXVM_Type type)
         case FXTYP_F3: return "vec3";
         case FXTYP_F4: return "vec4";
         case FXTYP_FUNC: return "func";
+        case FXTYP_GENF: return "genF";
     }
     return nullptr;
 }
@@ -817,6 +818,10 @@ FXVM_Type type_check_assign(FXVM_Compiler *compiler, FXVM_Ast *ast)
         if (sym_type != type_right)
         {
             invalid_assignment_of_varible_with_new_type(compiler, sym_start, sym_end, sym_type, type_right);
+        }
+        else if (syms->sym_types[sym_index] != FXSYM_Variable)
+        {
+            invalid_assignment_to_non_variable(compiler, left);
         }
     }
     else
@@ -941,19 +946,41 @@ FXVM_Type type_check_call(FXVM_Compiler *compiler, FXVM_Ast *ast)
         return FXTYP_NONE;
     }
 
+    FXVM_Type gen_type = FXTYP_NONE; // The type of generic vectors, if any parameters have such type.
     for (int param_index = 0; param_index < param_num; param_index++)
     {
         FXVM_Ast *param_node = ast->call.params.nodes[param_index];
-        type_check(compiler, param_node);
+        FXVM_Type param_type = type_check(compiler, param_node);
+        if (param_type == FXTYP_NONE)
+        {
+            // There already was an error
+            return FXTYP_NONE;
+        }
 
-        if (param_node->type != function_type.parameter_types[param_index])
+        FXVM_Type def_param_type = function_type.parameter_types[param_index];
+        if (def_param_type == FXTYP_GENF)
+        {
+            if (gen_type == FXTYP_NONE)
+            {
+                gen_type = param_type;
+                def_param_type = param_type;
+            }
+        }
+
+        if (param_type != def_param_type)
         {
             invalid_parameter_type(compiler, sym_start, sym_end, param_index + 1);
             return FXTYP_NONE;
         }
     }
 
-    return ast->type = syms->function_types[sym_index].return_type;
+    FXVM_Type ret_type = syms->function_types[sym_index].return_type;
+    if (ret_type == FXTYP_GENF)
+    {
+        ret_type = gen_type;
+    }
+
+    return ast->type = ret_type;
 }
 
 FXVM_Type type_check_root(FXVM_Compiler *compiler, FXVM_Ast *ast)
@@ -1441,8 +1468,8 @@ void register_input_variable(FXVM_Compiler *compiler, const char *name, FXVM_Typ
 
 bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end)
 {
-    int sqrt_i = register_builtin_function(compiler, "sqrt", FXTYP_F1, 1);
-    set_function_parameter_type(compiler, sqrt_i, 0, FXTYP_F1);
+    int sqrt_i = register_builtin_function(compiler, "sqrt", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, sqrt_i, 0, FXTYP_GENF);
 
     bool result =
         tokenize(compiler, source, source_end) &&

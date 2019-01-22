@@ -118,11 +118,6 @@ int main_simple_bc(int argc, char **argv)
     return 0;
 }
 
-const char *source = "\
-v = sqrt(1.0) * Particle_life_time;\
-v + 0.5;\
-";
-
 void report_compile_error(const char *err)
 {
     printf("Error: %s\n", err);
@@ -267,6 +262,11 @@ void print_il(FXVM_ILContext *ctx)
         print_instr(&ctx->instructions[i]);
     }
 }
+
+const char *source = "\
+v = sqrt(1.0) * Particle_life_time;\
+v + 0.5;\
+";
 
 int main(int argc, char **argv)
 {
