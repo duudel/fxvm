@@ -1020,6 +1020,10 @@ enum FXVM_ILOp
     FXIL_LOAD_CONST,
     FXIL_LOAD_INPUT,
     FXIL_MOV,
+    FXIL_MOV_X,
+    FXIL_MOV_XY,
+    FXIL_MOV_XYZ,
+    FXIL_MOV_XYZW,
     FXIL_NEG,
     FXIL_ADD,
     FXIL_SUB,
@@ -1045,34 +1049,37 @@ enum FXVM_ILOp
 struct FXVM_ILInstrInfo
 {
     const char *name;
-    int operand_num;
-    int const_operand_num;
-    int immediate;
+    int reg_operand_num;
+
 };
 
 FXVM_ILInstrInfo il_instr_info[] = {
-    [FXIL_LOAD_CONST] = {"FXIL_LOAD_CONST", 1, 1, 0},
-    [FXIL_LOAD_INPUT] = {"FXIL_LOAD_INPUT", 1, 0, 1},
-    [FXIL_MOV] =        {"FXIL_MOV", 2, 0, 0},
-    [FXIL_NEG] =        {"FXIL_NEG", 2, 0, 0},
-    [FXIL_ADD] =        {"FXIL_ADD", 3, 0, 0},
-    [FXIL_SUB] =        {"FXIL_SUB", 3, 0, 0},
-    [FXIL_MUL] =        {"FXIL_MUL", 3, 0, 0},
-    [FXIL_DIV] =        {"FXIL_DIV", 3, 0, 0},
-    [FXIL_RCP] =        {"FXIL_RCP", 2, 0, 0},
-    [FXIL_RSQRT] =      {"FXIL_RSQRT", 2, 0, 0},
-    [FXIL_SQRT] =       {"FXIL_SQRT", 2, 0, 0},
-    [FXIL_SIN] =        {"FXIL_SIN", 2, 0, 0},
-    [FXIL_COS] =        {"FXIL_COS", 2, 0, 0},
-    [FXIL_EXP] =        {"FXIL_EXP", 2, 0, 0},
-    [FXIL_EXP2] =       {"FXIL_EXP2", 2, 0, 0},
-    [FXIL_EXP10] =      {"FXIL_EXP10", 2, 0, 0},
-    [FXIL_ABS] =        {"FXIL_ABS", 2, 0, 0},
-    [FXIL_MIN] =        {"FXIL_MIN", 2, 0, 0},
-    [FXIL_MAX] =        {"FXIL_MAX", 2, 0, 0},
-    [FXIL_CLAMP01] =    {"FXIL_CLAMP01", 2, 0, 0},
-    [FXIL_CLAMP] =      {"FXIL_CLAMP", 2, 0, 0},
-    [FXIL_INTERP] =     {"FXIL_INTERP", 2, 0, 0},
+    [FXIL_LOAD_CONST] = {"FXIL_LOAD_CONST", 1},
+    [FXIL_LOAD_INPUT] = {"FXIL_LOAD_INPUT", 1},
+    [FXIL_MOV] =        {"FXIL_MOV", 2},
+    [FXIL_MOV_X] =      {"FXIL_MOV_X", 2},
+    [FXIL_MOV_XY] =     {"FXIL_MOV_XY", 3},
+    [FXIL_MOV_XYZ] =    {"FXIL_MOV_XYZ", 4},
+    [FXIL_MOV_XYZW] =   {"FXIL_MOV_XYZW", 5},
+    [FXIL_NEG] =        {"FXIL_NEG", 2},
+    [FXIL_ADD] =        {"FXIL_ADD", 3},
+    [FXIL_SUB] =        {"FXIL_SUB", 3},
+    [FXIL_MUL] =        {"FXIL_MUL", 3},
+    [FXIL_DIV] =        {"FXIL_DIV", 3},
+    [FXIL_RCP] =        {"FXIL_RCP", 2},
+    [FXIL_RSQRT] =      {"FXIL_RSQRT", 2},
+    [FXIL_SQRT] =       {"FXIL_SQRT", 2},
+    [FXIL_SIN] =        {"FXIL_SIN", 2},
+    [FXIL_COS] =        {"FXIL_COS", 2},
+    [FXIL_EXP] =        {"FXIL_EXP", 2},
+    [FXIL_EXP2] =       {"FXIL_EXP2", 2},
+    [FXIL_EXP10] =      {"FXIL_EXP10", 2},
+    [FXIL_ABS] =        {"FXIL_ABS", 2},
+    [FXIL_MIN] =        {"FXIL_MIN", 3},
+    [FXIL_MAX] =        {"FXIL_MAX", 3},
+    [FXIL_CLAMP01] =    {"FXIL_CLAMP01", 2},
+    [FXIL_CLAMP] =      {"FXIL_CLAMP", 4},
+    [FXIL_INTERP] =     {"FXIL_INTERP", 4},
 };
 
 const char* il_op_to_string(FXVM_ILOp op)
@@ -1083,10 +1090,11 @@ const char* il_op_to_string(FXVM_ILOp op)
 struct FXIL_Reg
 {
     int index;
+    //FXVM_Type type;
 };
 
 struct FXIL_Operands {
-    FXIL_Reg ops[3];
+    FXIL_Reg ops[5];
 };
 
 struct FXIL_ConstantLoad {
@@ -1133,6 +1141,38 @@ void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg a, FXIL_Reg b, FXIL_Reg
     ensure_il_instr_fits(ctx);
     int i = ctx->instr_num;
     ctx->instructions[i] = FXVM_ILInstr { op, a, b, c };
+    ctx->instr_num = i + 1;
+}
+
+void push_il_mov_x(FXVM_ILContext *ctx, FXIL_Reg target, FXIL_Reg x)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_MOV_X, target, x };
+    ctx->instr_num = i + 1;
+}
+
+void push_il_mov_xy(FXVM_ILContext *ctx, FXIL_Reg target, FXIL_Reg x, FXIL_Reg y)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_MOV_XY, target, x, y };
+    ctx->instr_num = i + 1;
+}
+
+void push_il_mov_xyz(FXVM_ILContext *ctx, FXIL_Reg target, FXIL_Reg x, FXIL_Reg y, FXIL_Reg z)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_MOV_XYZ, target, x, y, z };
+    ctx->instr_num = i + 1;
+}
+
+void push_il_mov_xyzw(FXVM_ILContext *ctx, FXIL_Reg target, FXIL_Reg x, FXIL_Reg y, FXIL_Reg z, FXIL_Reg w)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_MOV_XYZW, target, x, y, z, w };
     ctx->instr_num = i + 1;
 }
 
@@ -1370,6 +1410,75 @@ FXIL_Reg emit_clamp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call
 FXIL_Reg emit_lerp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 { return emit_single_param_func<FXIL_INTERP>(compiler, ctx, call); }
 
+FXIL_Reg emit_vec4(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXVM_Ast *param0 = call->call.params.nodes[0];
+    FXVM_Ast *param1 = call->call.params.nodes[1];
+    FXVM_Ast *param2 = call->call.params.nodes[2];
+    FXVM_Ast *param3 = call->call.params.nodes[3];
+    if ((param0->kind == FXAST_EXPR_NUMBER) &&
+        (param1->kind == FXAST_EXPR_NUMBER) &&
+        (param2->kind == FXAST_EXPR_NUMBER) &&
+        (param3->kind == FXAST_EXPR_NUMBER))
+    {
+        float v[4] = { param0->number.value, param1->number.value, param2->number.value, param3->number.value };
+        push_il_load_const(ctx, result, v);
+    }
+    else
+    {
+        FXIL_Reg x = generate_expr(compiler, ctx, param0);
+        FXIL_Reg y = generate_expr(compiler, ctx, param1);
+        FXIL_Reg z = generate_expr(compiler, ctx, param2);
+        FXIL_Reg w = generate_expr(compiler, ctx, param3);
+        push_il_mov_xyzw(ctx, result, x, y, z, w);
+    }
+    return result;
+}
+
+FXIL_Reg emit_vec3(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXVM_Ast *param0 = call->call.params.nodes[0];
+    FXVM_Ast *param1 = call->call.params.nodes[1];
+    FXVM_Ast *param2 = call->call.params.nodes[2];
+    if ((param0->kind == FXAST_EXPR_NUMBER) &&
+        (param1->kind == FXAST_EXPR_NUMBER) &&
+        (param2->kind == FXAST_EXPR_NUMBER))
+    {
+        float v[4] = { param0->number.value, param1->number.value, param2->number.value, 0.0f };
+        push_il_load_const(ctx, result, v);
+    }
+    else
+    {
+        FXIL_Reg x = generate_expr(compiler, ctx, param0);
+        FXIL_Reg y = generate_expr(compiler, ctx, param1);
+        FXIL_Reg z = generate_expr(compiler, ctx, param2);
+        push_il_mov_xyz(ctx, result, x, y, z);
+    }
+    return result;
+}
+
+FXIL_Reg emit_vec2(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXVM_Ast *param0 = call->call.params.nodes[0];
+    FXVM_Ast *param1 = call->call.params.nodes[1];
+    if ((param0->kind == FXAST_EXPR_NUMBER) &&
+        (param1->kind == FXAST_EXPR_NUMBER))
+    {
+        float v[4] = { param0->number.value, param1->number.value, 0.0f, 0.0f };
+        push_il_load_const(ctx, result, v);
+    }
+    else
+    {
+        FXIL_Reg x = generate_expr(compiler, ctx, param0);
+        FXIL_Reg y = generate_expr(compiler, ctx, param1);
+        push_il_mov_xy(ctx, result, x, y);
+    }
+    return result;
+}
+
 FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
 {
     struct BuiltinInfo
@@ -1378,6 +1487,9 @@ FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_A
         FXIL_Reg (*emit)(FXVM_Compiler*, FXVM_ILContext*, FXVM_Ast*);
     };
     const BuiltinInfo builtins[] = {
+        {"vec4", emit_vec4},
+        {"vec3", emit_vec3},
+        {"vec2", emit_vec2},
         {"rcp", emit_rcp},
         {"rsqrt", emit_rsqrt},
         {"sqrt", emit_sqrt},
@@ -1468,6 +1580,21 @@ void register_input_variable(FXVM_Compiler *compiler, const char *name, FXVM_Typ
 
 bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end)
 {
+    int vec4_i = register_builtin_function(compiler, "vec4", FXTYP_F4, 4);
+    set_function_parameter_type(compiler, vec4_i, 0, FXTYP_F1);
+    set_function_parameter_type(compiler, vec4_i, 1, FXTYP_F1);
+    set_function_parameter_type(compiler, vec4_i, 2, FXTYP_F1);
+    set_function_parameter_type(compiler, vec4_i, 3, FXTYP_F1);
+
+    int vec3_i = register_builtin_function(compiler, "vec3", FXTYP_F3, 3);
+    set_function_parameter_type(compiler, vec3_i, 0, FXTYP_F1);
+    set_function_parameter_type(compiler, vec3_i, 1, FXTYP_F1);
+    set_function_parameter_type(compiler, vec3_i, 2, FXTYP_F1);
+
+    int vec2_i = register_builtin_function(compiler, "vec2", FXTYP_F2, 2);
+    set_function_parameter_type(compiler, vec2_i, 0, FXTYP_F1);
+    set_function_parameter_type(compiler, vec2_i, 1, FXTYP_F1);
+
     int sqrt_i = register_builtin_function(compiler, "sqrt", FXTYP_GENF, 1);
     set_function_parameter_type(compiler, sqrt_i, 0, FXTYP_GENF);
 

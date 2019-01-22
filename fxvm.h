@@ -49,7 +49,9 @@ enum Particle_Bytecode_OP
 {
     PBOP_LOAD_CONST,
     PBOP_LOAD_INPUT,
+    PBOP_SWIZZLE,
     PBOP_MOV,
+    PBOP_MOV_MASK,
     PBOP_ADD,
     PBOP_SUB,
     PBOP_MUL,
@@ -123,12 +125,31 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_load(input + input_offset);
                 p += 3;
             } break;
+        case PBOP_SWIZZLE:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t source_reg = (p[1] >> 4) & 0xf;
+                uint8_t swizzle_mask = p[2];
+                S.r[target_reg] = reg_swizzle(S.r[source_reg], swizzle_mask);
+                p += 3;
+            } break;
         case PBOP_MOV:
             {
                 uint8_t target_reg = p[1] & 0xf;
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = S.r[source_reg];
                 p += 2;
+            } break;
+        case PBOP_MOV_MASK:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t source_reg = (p[1] >> 4) & 0xf;
+                uint8_t mov_mask = p[2];
+                S.r[target_reg].v[0] = (mov_mask & 1) ? S.r[source_reg].v[0] : S.r[target_reg].v[0];
+                S.r[target_reg].v[1] = (mov_mask & 2) ? S.r[source_reg].v[1] : S.r[target_reg].v[1];
+                S.r[target_reg].v[2] = (mov_mask & 4) ? S.r[source_reg].v[2] : S.r[target_reg].v[2];
+                S.r[target_reg].v[3] = (mov_mask & 8) ? S.r[source_reg].v[3] : S.r[target_reg].v[3];
+                p += 3;
             } break;
         case PBOP_ADD:
             {

@@ -14,6 +14,15 @@ inline Reg reg_load(const uint8_t *p)
     return { v[0], v[1], v[2], v[3] };
 }
 
+inline Reg reg_swizzle(Reg a, uint8_t mask)
+{
+    uint8_t i0 = mask & 0x3;
+    uint8_t i1 = (mask >> 2) & 0x3;
+    uint8_t i2 = (mask >> 4) & 0x3;
+    uint8_t i3 = (mask >> 6) & 0x3;
+    return { a.v[i0], a.v[i1], a.v[i2], a.v[i3] };
+}
+
 inline Reg reg_add(Reg a, Reg b)
 { return { a.v[0] + b.v[0], a.v[1] + b.v[1], a.v[2] + b.v[2], a.v[3] + b.v[3] }; }
 

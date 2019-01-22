@@ -224,7 +224,7 @@ void print_instr(FXVM_ILInstr *instr)
                 instr->input_load.input_index);
         break;
     default:
-        switch (il_instr_info[instr->op].operand_num)
+        switch (il_instr_info[instr->op].reg_operand_num)
         {
         case 0:
             printf("%-16s\n", il_op_to_string(instr->op));
@@ -264,9 +264,29 @@ void print_il(FXVM_ILContext *ctx)
 }
 
 const char *source = "\
-v = sqrt(1.0) * Particle_life_time;\
-v + 0.5;\
+v = sqrt(vec2(1.0,2.0)) * Particle_life_time;\
+v + vec2(0.5,0.5);\
+v3 = vec3(3, 2, 1);\n\
 ";
+/*
+x = v3.x;\n\
+yxz = v3.yxz;\n\
+v4 = vec4(v3, v);\n\
+";
+*/
+
+// vec4 r6 <- r5.xyz, r0.x
+// swizzle r6 <- r5.x, r5.y, r5.z, r0.x
+// v4_set r6 <- r5 r5 r5
+//
+// a = vec4(1, v.z, 0, v.x)
+// =>
+// load_const r1 <- 1
+// mov_x r0 <- r1 x
+// mov_xy r0 <- r2 z
+// mov_xyz r0 <- 0.0
+// mov_xyzw r0 <- r2 x
+//
 
 int main(int argc, char **argv)
 {
@@ -282,9 +302,12 @@ int main(int argc, char **argv)
 
     printf("%s\n", source);
     printf("---\n");
-    print_ast(compiler.ast, 0);
-    printf("---\n");
-    print_il(&compiler.il_context);
+    if (compiler.ast)
+    {
+        print_ast(compiler.ast, 0);
+        printf("---\n");
+        print_il(&compiler.il_context);
+    }
 
     return 0;
 }
