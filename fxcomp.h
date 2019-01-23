@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <cstdint>
 
 enum FXVM_TokenKind
 {
@@ -39,6 +40,13 @@ struct FXVM_ILContext
     FXVM_ILInstr *instructions;
 };
 
+struct FXVM_Codegen
+{
+    int buffer_len;
+    int buffer_cap;
+    uint8_t *buffer;
+};
+
 struct FXVM_Compiler
 {
     int token_num;
@@ -46,6 +54,7 @@ struct FXVM_Compiler
     FXVM_Token *tokens;
     FXVM_Ast *ast;
     FXVM_ILContext il_context;
+    FXVM_Codegen codegen;
 
     FXVM_Symbols symbols;
 
@@ -1050,7 +1059,6 @@ struct FXVM_ILInstrInfo
 {
     const char *name;
     int reg_operand_num;
-
 };
 
 FXVM_ILInstrInfo il_instr_info[] = {
@@ -1093,25 +1101,20 @@ struct FXIL_Reg
     //FXVM_Type type;
 };
 
-struct FXIL_Operands {
-    FXIL_Reg ops[5];
-};
-
 struct FXIL_ConstantLoad {
-    FXIL_Reg target;
     float v[4];
 };
 
 struct FXIL_InputLoad {
-    FXIL_Reg target;
     int input_index;
 };
 
 struct FXVM_ILInstr
 {
     FXVM_ILOp op;
+    FXIL_Reg target;
     union {
-        FXIL_Operands operands;
+        FXIL_Reg read_operands[4];
         FXIL_ConstantLoad constant_load;
         FXIL_InputLoad input_load;
     };
@@ -1136,11 +1139,11 @@ void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg a, FXIL_Reg b)
     ctx->instr_num = i + 1;
 }
 
-void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg a, FXIL_Reg b, FXIL_Reg c)
+void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg target, FXIL_Reg a, FXIL_Reg b)
 {
     ensure_il_instr_fits(ctx);
     int i = ctx->instr_num;
-    ctx->instructions[i] = FXVM_ILInstr { op, a, b, c };
+    ctx->instructions[i] = FXVM_ILInstr { op, target, a, b };
     ctx->instr_num = i + 1;
 }
 
@@ -1180,7 +1183,7 @@ void push_il_load_const(FXVM_ILContext *ctx, FXIL_Reg target, float v)
 {
     ensure_il_instr_fits(ctx);
     int i = ctx->instr_num;
-    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_CONST, .constant_load = {.target = target, v } };
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_CONST, .target = target, .constant_load = { v } };
     ctx->instr_num = i + 1;
 }
 
@@ -1188,7 +1191,7 @@ void push_il_load_const(FXVM_ILContext *ctx, FXIL_Reg target, float *v)
 {
     ensure_il_instr_fits(ctx);
     int i = ctx->instr_num;
-    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_CONST, .constant_load = {.target = target, v[0], v[1], v[2], v[3] } };
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_CONST, .target = target, .constant_load = { v[0], v[1], v[2], v[3] } };
     ctx->instr_num = i + 1;
 }
 
@@ -1196,7 +1199,7 @@ void push_il_load_input(FXVM_ILContext *ctx, FXIL_Reg target, int input_index)
 {
     ensure_il_instr_fits(ctx);
     int i = ctx->instr_num;
-    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_INPUT, .input_load = {.target = target, input_index} };
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_INPUT, .target = target, .input_load = {input_index} };
     ctx->instr_num = i + 1;
 }
 
@@ -1547,6 +1550,153 @@ bool generate_il(FXVM_Compiler *compiler)
     return true;
 }
 
+// REGISTER ALLOCATOR
+
+struct Registers
+{
+    enum { MAX_REGS = 16 };
+
+    bool used[MAX_REGS];
+
+    struct Span
+    {
+        int first_write; // IL instruction index, where this pseudo reg is first written.
+        int last_read; // IL instruction index, where this pseudo reg is last read.
+    };
+
+    int span_num;
+    Span *spans;
+};
+
+int alloc_reg(FXVM_Codegen *gen, Registers *regs, int valid_mask = 0xff)
+{
+    (void)gen;
+    (void)regs;
+    (void)valid_mask;
+    return 0;
+}
+
+void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
+{
+    (void)gen;
+    (void)regs;
+    (void)instr;
+    //switch (instr->op)
+    //{
+    //case FXIL_LOAD_CONST:
+    //    {
+
+    //    } break;
+    //}
+}
+
+void write_to(Registers *regs, FXIL_Reg reg, int instruction_index)
+{
+    if (regs->spans[reg.index].first_write == -1)
+    {
+        regs->spans[reg.index].first_write = instruction_index;
+    }
+}
+
+void read_from(Registers *regs, FXIL_Reg reg, int instruction_index)
+{
+    regs->spans[reg.index].last_read = instruction_index;
+}
+
+void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
+{
+    int span_num = compiler->il_context.reg_index;
+    regs->span_num = span_num;
+    regs->spans = (Registers::Span*)malloc(span_num * sizeof(Registers::Span));
+    for (int i = 0; i < span_num; i++)
+    {
+        regs->spans[i] = { -1, -1 };
+    }
+
+    auto instructions = compiler->il_context.instructions;
+    for (int i = 0; i < compiler->il_context.instr_num; i++)
+    {
+        write_to(regs, instructions[i].target, i);
+        switch (instructions[i].op)
+        {
+            case FXIL_LOAD_CONST:
+            case FXIL_LOAD_INPUT:
+                break;
+            case FXIL_MOV:
+                read_from(regs, instructions[i].read_operands[0], i);
+                break;
+            case FXIL_MOV_X:
+                read_from(regs, instructions[i].read_operands[0], i);
+                break;
+            case FXIL_MOV_XY:
+                read_from(regs, instructions[i].read_operands[0], i);
+                read_from(regs, instructions[i].read_operands[1], i);
+                break;
+            case FXIL_MOV_XYZ:
+                read_from(regs, instructions[i].read_operands[0], i);
+                read_from(regs, instructions[i].read_operands[1], i);
+                read_from(regs, instructions[i].read_operands[2], i);
+                break;
+            case FXIL_MOV_XYZW:
+                read_from(regs, instructions[i].read_operands[0], i);
+                read_from(regs, instructions[i].read_operands[1], i);
+                read_from(regs, instructions[i].read_operands[2], i);
+                read_from(regs, instructions[i].read_operands[3], i);
+                break;
+            case FXIL_NEG:
+            case FXIL_RCP:
+            case FXIL_RSQRT:
+            case FXIL_SQRT:
+            case FXIL_SIN:
+            case FXIL_COS:
+            case FXIL_EXP:
+            case FXIL_EXP2:
+            case FXIL_EXP10:
+            case FXIL_ABS:
+                read_from(regs, instructions[i].read_operands[0], i);
+                break;
+            case FXIL_ADD:
+            case FXIL_SUB:
+            case FXIL_MUL:
+            case FXIL_DIV:
+            case FXIL_MIN:
+            case FXIL_MAX:
+                read_from(regs, instructions[i].read_operands[0], i);
+                read_from(regs, instructions[i].read_operands[1], i);
+                break;
+            case FXIL_CLAMP01:
+                read_from(regs, instructions[i].read_operands[0], i);
+                break;
+            case FXIL_CLAMP:
+                read_from(regs, instructions[i].read_operands[0], i);
+                read_from(regs, instructions[i].read_operands[1], i);
+                read_from(regs, instructions[i].read_operands[2], i);
+                break;
+            case FXIL_INTERP:
+                read_from(regs, instructions[i].read_operands[0], i);
+                read_from(regs, instructions[i].read_operands[1], i);
+                read_from(regs, instructions[i].read_operands[2], i);
+                break;
+        }
+    }
+}
+
+bool write_bytecode(FXVM_Compiler *compiler)
+{
+    FXVM_Codegen *gen = &compiler->codegen;
+    Registers regs = { };
+
+    initialize_spans(compiler, &regs);
+
+    for (int i = 0; i < compiler->il_context.instr_num; i++)
+    {
+        write_instruction(gen, &regs, &compiler->il_context.instructions[i]);
+    }
+
+    return true;
+}
+
+
 void register_constant(FXVM_Compiler *compiler, const char *name, float *value, int width)
 {
     push_symbol_builtin_constant(&compiler->symbols, name, name + strlen(name), value, width);
@@ -1603,7 +1753,7 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
         parse(compiler) &&
         type_check(compiler) &&
         generate_il(compiler) && true;
-        //write_bytecode(compile);
+        write_bytecode(compiler);
     return result;
 }
 

@@ -212,7 +212,7 @@ void print_instr(FXVM_ILInstr *instr)
     {
     case FXIL_LOAD_CONST:
         printf("%-16s r%d <- [%.6f %.6f %.6f %.6f]\n", il_op_to_string(instr->op),
-                instr->constant_load.target.index,
+                instr->target.index,
                 instr->constant_load.v[0],
                 instr->constant_load.v[1],
                 instr->constant_load.v[2],
@@ -220,7 +220,7 @@ void print_instr(FXVM_ILInstr *instr)
         break;
     case FXIL_LOAD_INPUT:
         printf("%-16s r%d <- input[%d]\n", il_op_to_string(instr->op),
-                instr->input_load.target.index,
+                instr->target.index,
                 instr->input_load.input_index);
         break;
     default:
@@ -231,25 +231,33 @@ void print_instr(FXVM_ILInstr *instr)
             break;
         case 1:
             printf("%-16s r%d\n", il_op_to_string(instr->op),
-                    instr->operands.ops[0].index);
+                    instr->target.index);
             break;
         case 2:
             printf("%-16s r%d <- r%d\n", il_op_to_string(instr->op),
-                    instr->operands.ops[0].index,
-                    instr->operands.ops[1].index);
+                    instr->target.index,
+                    instr->read_operands[0].index);
             break;
         case 3:
             printf("%-16s r%d <- r%d r%d\n", il_op_to_string(instr->op),
-                    instr->operands.ops[0].index,
-                    instr->operands.ops[1].index,
-                    instr->operands.ops[2].index);
+                    instr->target.index,
+                    instr->read_operands[0].index,
+                    instr->read_operands[1].index);
             break;
         case 4:
             printf("%-16s r%d <- r%d r%d r%d\n", il_op_to_string(instr->op),
-                    instr->operands.ops[0].index,
-                    instr->operands.ops[1].index,
-                    instr->operands.ops[2].index,
-                    instr->operands.ops[3].index);
+                    instr->target.index,
+                    instr->read_operands[0].index,
+                    instr->read_operands[1].index,
+                    instr->read_operands[2].index);
+            break;
+        case 5:
+            printf("%-16s r%d <- r%d r%d r%d r%d\n", il_op_to_string(instr->op),
+                    instr->target.index,
+                    instr->read_operands[0].index,
+                    instr->read_operands[1].index,
+                    instr->read_operands[2].index,
+                    instr->read_operands[3].index);
             break;
         }
     }
