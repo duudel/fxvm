@@ -1631,6 +1631,7 @@ int allocate_register(FXVM_Codegen *gen, Registers *regs, FXIL_Reg pseudo_reg, i
         }
     }
     // TODO; Emit error: register pressure!
+    // TODO: Try to free valid register by re-allocating a used register
     return -1;
 }
 
@@ -1992,12 +1993,13 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
                 break;
         }
     }
-
+#ifdef DEBUG_REG_ALLOCATOR
     for (int i = 0; i < span_num; i++)
     {
         auto span = regs->spans[i];
         printf("span for pseudo reg %d: %d -> %d\n", i, span.first_write, span.last_read);
     }
+#endif
 }
 
 bool write_bytecode(FXVM_Compiler *compiler)
@@ -2007,10 +2009,24 @@ bool write_bytecode(FXVM_Compiler *compiler)
 
     initialize_spans(compiler, &regs);
 
+    auto instructions = compiler->il_context.instructions;
     for (int i = 0; i < compiler->il_context.instr_num; i++)
     {
-        write_instruction(gen, &regs, &compiler->il_context.instructions[i]);
+        write_instruction(gen, &regs, &instructions[i]);
         free_registers(&regs, i);
+    }
+
+    // Ensure the last write is returned in r0
+    if (compiler->il_context.instr_num > 0)
+    {
+        auto last_instr = instructions[compiler->il_context.instr_num - 1];
+        FXIL_Reg last_target = last_instr.target;
+        int target_reg = regs.spans[last_target.index].allocated_reg;
+        if (target_reg != 0)
+        {
+            write_op(gen, FXOP_MOV);
+            write_regs(gen, 0, target_reg);
+        }
     }
 
     return true;
