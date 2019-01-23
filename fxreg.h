@@ -23,6 +23,21 @@ inline Reg reg_swizzle(Reg a, uint8_t mask)
     return { a.v[i0], a.v[i1], a.v[i2], a.v[i3] };
 }
 
+inline Reg reg_mov_x(Reg x)
+{ return { x.v[0], 0.0f, 0.0f, 0.0f }; }
+
+inline Reg reg_mov_xy(Reg x, Reg y)
+{ return { x.v[0], y.v[0], 0.0f, 0.0f }; }
+
+inline Reg reg_mov_xyz(Reg x, Reg y, Reg z)
+{ return { x.v[0], y.v[0], z.v[0], 0.0f }; }
+
+inline Reg reg_mov_xyzw(Reg x, Reg y, Reg z, Reg w)
+{ return { x.v[0], y.v[0], z.v[0], w.v[0] }; }
+
+inline Reg reg_neg(Reg a)
+{ return { -a.v[0], -a.v[1], -a.v[2], -a.v[3] }; }
+
 inline Reg reg_add(Reg a, Reg b)
 { return { a.v[0] + b.v[0], a.v[1] + b.v[1], a.v[2] + b.v[2], a.v[3] + b.v[3] }; }
 

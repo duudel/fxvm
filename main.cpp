@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
+/*
 struct Bytecode_Writer
 {
     int max_size;
@@ -117,6 +118,7 @@ int main_simple_bc(int argc, char **argv)
 
     return 0;
 }
+*/
 
 void report_compile_error(const char *err)
 {
@@ -315,6 +317,23 @@ int main(int argc, char **argv)
         print_ast(compiler.ast, 0);
         printf("---\n");
         print_il(&compiler.il_context);
+    }
+
+    {
+        float input[16] = {10.0f, 10.0f, 12.0f, 15.0f, 0.0f};
+        Particle_Bytecode bytecode = { compiler.codegen.buffer_len, compiler.codegen.buffer };
+        Particle_VM_State state = { };
+        exec(state, (uint8_t*)input, &bytecode);
+
+        printf("---\n");
+        Reg r0 = state.r[0];
+        printf("r0 = %.3f, %.3f, %.3f %.3f\n", r0.v[0], r0.v[1], r0.v[2], r0.v[3]);
+        printf("---\n");
+        for (int r = 0 ; r < 16; r++)
+        {
+            Reg r0 = state.r[r];
+            printf("r%-2d = %.3f, %.3f, %.3f %.3f\n", r, r0.v[0], r0.v[1], r0.v[2], r0.v[3]);
+        }
     }
 
     return 0;

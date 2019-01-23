@@ -1,6 +1,7 @@
 #ifndef FXVM_COMP
 
 #include "fxsyms.h"
+#include "fxop.h"
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -1147,6 +1148,14 @@ void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg target, FXIL_Reg a, FXI
     ctx->instr_num = i + 1;
 }
 
+void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg target, FXIL_Reg a, FXIL_Reg b, FXIL_Reg c)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { op, target, a, b, c };
+    ctx->instr_num = i + 1;
+}
+
 void push_il_mov_x(FXVM_ILContext *ctx, FXIL_Reg target, FXIL_Reg x)
 {
     ensure_il_instr_fits(ctx);
@@ -1399,19 +1408,45 @@ FXIL_Reg emit_abs(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 { return emit_single_param_func<FXIL_ABS>(compiler, ctx, call); }
 
 FXIL_Reg emit_min(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
-{ return emit_single_param_func<FXIL_MIN>(compiler, ctx, call); }
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXIL_Reg param_a = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    FXIL_Reg param_b = generate_expr(compiler, ctx, call->call.params.nodes[1]);
+    push_il(ctx, FXIL_MIN, result, param_a, param_b);
+    return result;
+}
 
 FXIL_Reg emit_max(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
-{ return emit_single_param_func<FXIL_MAX>(compiler, ctx, call); }
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXIL_Reg param_a = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    FXIL_Reg param_b = generate_expr(compiler, ctx, call->call.params.nodes[1]);
+    push_il(ctx, FXIL_MAX, result, param_a, param_b);
+    return result;
+}
 
 FXIL_Reg emit_clamp01(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 { return emit_single_param_func<FXIL_CLAMP01>(compiler, ctx, call); }
 
 FXIL_Reg emit_clamp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
-{ return emit_single_param_func<FXIL_CLAMP>(compiler, ctx, call); }
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXIL_Reg param_x = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    FXIL_Reg param_a = generate_expr(compiler, ctx, call->call.params.nodes[1]);
+    FXIL_Reg param_b = generate_expr(compiler, ctx, call->call.params.nodes[2]);
+    push_il(ctx, FXIL_CLAMP, result, param_x, param_a, param_b);
+    return result;
+}
 
 FXIL_Reg emit_lerp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
-{ return emit_single_param_func<FXIL_INTERP>(compiler, ctx, call); }
+{
+    FXIL_Reg result = new_il_reg(ctx);
+    FXIL_Reg param_a = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    FXIL_Reg param_b = generate_expr(compiler, ctx, call->call.params.nodes[1]);
+    FXIL_Reg param_t = generate_expr(compiler, ctx, call->call.params.nodes[2]);
+    push_il(ctx, FXIL_CLAMP, result, param_t, param_a, param_b);
+    return result;
+}
 
 FXIL_Reg emit_vec4(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 {
@@ -1556,38 +1591,316 @@ struct Registers
 {
     enum { MAX_REGS = 16 };
 
-    bool used[MAX_REGS];
+    bool used[MAX_REGS]; // TODO: wasteful
 
     struct Span
     {
         int first_write; // IL instruction index, where this pseudo reg is first written.
         int last_read; // IL instruction index, where this pseudo reg is last read.
+
+        int allocated_reg;
     };
 
     int span_num;
     Span *spans;
 };
 
-int alloc_reg(FXVM_Codegen *gen, Registers *regs, int valid_mask = 0xff)
+void free_registers(Registers *regs, int instruction_index)
+{
+    for (int i = 0; i < regs->span_num; i++)
+    {
+        if (regs->spans[i].last_read == instruction_index)
+        {
+            regs->used[regs->spans[i].allocated_reg] = false;
+        }
+    }
+}
+
+int allocate_register(FXVM_Codegen *gen, Registers *regs, FXIL_Reg pseudo_reg, int valid_mask = 0xff)
 {
     (void)gen;
-    (void)regs;
-    (void)valid_mask;
-    return 0;
+    for (int i = 0; i < Registers::MAX_REGS; i++)
+    {
+        if ((i & valid_mask) == 0) continue;
+
+        if (!regs->used[i])
+        {
+            regs->used[i] = true;
+            regs->spans[pseudo_reg.index].allocated_reg = i;
+            return i;
+        }
+    }
+    // TODO; Emit error: register pressure!
+    return -1;
+}
+
+int get_register(Registers *regs, FXIL_Reg pseudo_reg)
+{
+    return regs->spans[pseudo_reg.index].allocated_reg;
+}
+
+void ensure_bytes_fit(FXVM_Codegen *gen, int n)
+{
+    if (gen->buffer_len + n > gen->buffer_cap)
+    {
+        int new_cap = gen->buffer_len + ((n > 32) ? n : 32);
+        gen->buffer = (uint8_t*)realloc(gen->buffer, new_cap * sizeof(uint8_t));
+        gen->buffer_cap = new_cap;
+    }
+}
+
+void write_op(FXVM_Codegen *gen, FXVM_BytecodeOp op)
+{
+    ensure_bytes_fit(gen, 1);
+    gen->buffer[gen->buffer_len] = (uint8_t)op;
+    gen->buffer_len++;
+}
+
+void write_regs(FXVM_Codegen *gen, uint8_t target)
+{
+    ensure_bytes_fit(gen, 1);
+    gen->buffer[gen->buffer_len] = target;
+    gen->buffer_len++;
+}
+
+void write_regs(FXVM_Codegen *gen, uint8_t target, uint8_t operand)
+{
+    ensure_bytes_fit(gen, 1);
+    uint8_t regs = target | (operand << 4);
+    gen->buffer[gen->buffer_len] = regs;
+    gen->buffer_len++;
+}
+
+void write_const(FXVM_Codegen *gen, float *constant_f4)
+{
+    ensure_bytes_fit(gen, sizeof(float) * 4);
+    memcpy(gen->buffer + gen->buffer_len, constant_f4, sizeof(float) * 4);
+    gen->buffer_len += sizeof(float) * 4;
+}
+
+void write_input_index(FXVM_Codegen *gen, int index)
+{
+    uint8_t index8 = (uint8_t)index;
+    ensure_bytes_fit(gen, sizeof(uint8_t));
+    memcpy(gen->buffer + gen->buffer_len, &index8, sizeof(uint8_t));
+    gen->buffer_len += sizeof(uint8_t);
 }
 
 void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
 {
-    (void)gen;
-    (void)regs;
-    (void)instr;
-    //switch (instr->op)
-    //{
-    //case FXIL_LOAD_CONST:
-    //    {
-
-    //    } break;
-    //}
+    switch (instr->op)
+    {
+    case FXIL_LOAD_CONST:
+        {
+            int reg = allocate_register(gen, regs, instr->target);
+            write_op(gen, FXOP_LOAD_CONST);
+            write_regs(gen, reg);
+            write_const(gen, instr->constant_load.v);
+        } break;
+    case FXIL_LOAD_INPUT:
+        {
+            int reg = allocate_register(gen, regs, instr->target);
+            write_op(gen, FXOP_LOAD_INPUT);
+            write_regs(gen, reg);
+            write_input_index(gen, instr->input_load.input_index);
+        } break;
+    case FXIL_MOV:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_MOV);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_MOV_X:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_MOV_X);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_MOV_XY:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int x_reg = get_register(regs, instr->read_operands[0]);
+            int y_reg = get_register(regs, instr->read_operands[1]);
+            write_op(gen, FXOP_MOV_XY);
+            write_regs(gen, target_reg, x_reg);
+            write_regs(gen, y_reg);
+        } break;
+    case FXIL_MOV_XYZ:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int x_reg = get_register(regs, instr->read_operands[0]);
+            int y_reg = get_register(regs, instr->read_operands[1]);
+            int z_reg = get_register(regs, instr->read_operands[2]);
+            write_op(gen, FXOP_MOV_XY);
+            write_regs(gen, target_reg, x_reg);
+            write_regs(gen, y_reg, z_reg);
+        } break;
+    case FXIL_MOV_XYZW:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int x_reg = get_register(regs, instr->read_operands[0]);
+            int y_reg = get_register(regs, instr->read_operands[1]);
+            int z_reg = get_register(regs, instr->read_operands[2]);
+            int w_reg = get_register(regs, instr->read_operands[3]);
+            write_op(gen, FXOP_MOV_XY);
+            write_regs(gen, target_reg, x_reg);
+            write_regs(gen, y_reg, z_reg);
+            write_regs(gen, w_reg);
+        } break;
+    case FXIL_NEG:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_NEG);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_ADD:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int a_reg = get_register(regs, instr->read_operands[0]);
+            int b_reg = get_register(regs, instr->read_operands[1]);
+            write_op(gen, FXOP_ADD);
+            write_regs(gen, target_reg, a_reg);
+            write_regs(gen, b_reg);
+        } break;
+    case FXIL_SUB:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int a_reg = get_register(regs, instr->read_operands[0]);
+            int b_reg = get_register(regs, instr->read_operands[1]);
+            write_op(gen, FXOP_SUB);
+            write_regs(gen, target_reg, a_reg);
+            write_regs(gen, b_reg);
+        } break;
+    case FXIL_MUL:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int a_reg = get_register(regs, instr->read_operands[0]);
+            int b_reg = get_register(regs, instr->read_operands[1]);
+            write_op(gen, FXOP_MUL);
+            write_regs(gen, target_reg, a_reg);
+            write_regs(gen, b_reg);
+        } break;
+    case FXIL_DIV:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int a_reg = get_register(regs, instr->read_operands[0]);
+            int b_reg = get_register(regs, instr->read_operands[1]);
+            write_op(gen, FXOP_DIV);
+            write_regs(gen, target_reg, a_reg);
+            write_regs(gen, b_reg);
+        } break;
+    case FXIL_RCP:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_NEG);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_RSQRT:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_RSQRT);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_SQRT:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_SQRT);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_SIN:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_SIN);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_COS:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_COS);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_EXP:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_EXP);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_EXP2:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_EXP2);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_EXP10:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_EXP10);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_ABS:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_ABS);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_MIN:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg1 = get_register(regs, instr->read_operands[0]);
+            int source_reg2 = get_register(regs, instr->read_operands[1]);
+            write_op(gen, FXOP_MIN);
+            write_regs(gen, target_reg, source_reg1);
+            write_regs(gen, source_reg2);
+        } break;
+    case FXIL_MAX:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg1 = get_register(regs, instr->read_operands[0]);
+            int source_reg2 = get_register(regs, instr->read_operands[1]);
+            write_op(gen, FXOP_MAX);
+            write_regs(gen, target_reg, source_reg1);
+            write_regs(gen, source_reg2);
+        } break;
+    case FXIL_CLAMP01:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_CLAMP01);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_CLAMP:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int x_reg = get_register(regs, instr->read_operands[0]);
+            int a_reg = get_register(regs, instr->read_operands[1]);
+            int b_reg = get_register(regs, instr->read_operands[2]);
+            write_op(gen, FXOP_CLAMP01);
+            write_regs(gen, target_reg, x_reg);
+            write_regs(gen, a_reg, b_reg);
+        } break;
+    case FXIL_INTERP:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int t_reg = get_register(regs, instr->read_operands[0]);
+            int a_reg = get_register(regs, instr->read_operands[1]);
+            int b_reg = get_register(regs, instr->read_operands[2]);
+            write_op(gen, FXOP_CLAMP01);
+            write_regs(gen, target_reg, t_reg);
+            write_regs(gen, a_reg, b_reg);
+        } break;
+    }
 }
 
 void write_to(Registers *regs, FXIL_Reg reg, int instruction_index)
@@ -1610,7 +1923,7 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
     regs->spans = (Registers::Span*)malloc(span_num * sizeof(Registers::Span));
     for (int i = 0; i < span_num; i++)
     {
-        regs->spans[i] = { -1, -1 };
+        regs->spans[i] = { -1, -1, -1 };
     }
 
     auto instructions = compiler->il_context.instructions;
@@ -1679,6 +1992,12 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
                 break;
         }
     }
+
+    for (int i = 0; i < span_num; i++)
+    {
+        auto span = regs->spans[i];
+        printf("span for pseudo reg %d: %d -> %d\n", i, span.first_write, span.last_read);
+    }
 }
 
 bool write_bytecode(FXVM_Compiler *compiler)
@@ -1691,6 +2010,7 @@ bool write_bytecode(FXVM_Compiler *compiler)
     for (int i = 0; i < compiler->il_context.instr_num; i++)
     {
         write_instruction(gen, &regs, &compiler->il_context.instructions[i]);
+        free_registers(&regs, i);
     }
 
     return true;
@@ -1744,6 +2064,12 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
     int vec2_i = register_builtin_function(compiler, "vec2", FXTYP_F2, 2);
     set_function_parameter_type(compiler, vec2_i, 0, FXTYP_F1);
     set_function_parameter_type(compiler, vec2_i, 1, FXTYP_F1);
+
+    int rcp_t = register_builtin_function(compiler, "rcp", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, rcp_t, 0, FXTYP_GENF);
+
+    int rsqrt_i = register_builtin_function(compiler, "rsqrt", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, rsqrt_i, 0, FXTYP_GENF);
 
     int sqrt_i = register_builtin_function(compiler, "sqrt", FXTYP_GENF, 1);
     set_function_parameter_type(compiler, sqrt_i, 0, FXTYP_GENF);
