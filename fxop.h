@@ -34,5 +34,39 @@ enum FXVM_BytecodeOp
     FXOP_INTERP,
 };
 
+const char* fxvm_opcode_string[] =
+{
+    "FXOP_LOAD_CONST",
+    "FXOP_LOAD_INPUT",
+    "FXOP_SWIZZLE",
+    "FXOP_MOV",
+    "FXOP_MOV_X",
+    "FXOP_MOV_XY",
+    "FXOP_MOV_XYZ",
+    "FXOP_MOV_XYZW",
+    "FXOP_MOV_MASK",
+    "FXOP_NEG",
+    "FXOP_ADD",
+    "FXOP_SUB",
+    "FXOP_MUL",
+    "FXOP_DIV",
+    //FXOP_FMA,
+    "FXOP_RCP",
+    "FXOP_RSQRT",
+    "FXOP_SQRT",
+    "FXOP_SIN",
+    "FXOP_COS",
+    "FXOP_EXP",
+    "FXOP_EXP2",
+    "FXOP_EXP10",
+    //FXOP_DOT,
+    "FXOP_ABS",
+    "FXOP_MIN",
+    "FXOP_MAX",
+    "FXOP_CLAMP01",
+    "FXOP_CLAMP",
+    "FXOP_INTERP",
+};
+
 #define FXVM_OP
 #endif

@@ -4,122 +4,6 @@
 #include <cstdio>
 #include <cstring>
 
-/*
-struct Bytecode_Writer
-{
-    int max_size;
-    int len;
-    uint8_t *code;
-};
-
-
-void ensure_bytes_fit(Bytecode_Writer *writer, int bytes)
-{
-    if (writer->len + bytes > writer->max_size)
-    {
-        int max_size = writer->len + bytes + 32;
-        writer->code = (uint8_t*)realloc(writer->code, max_size);
-        writer->max_size = max_size;
-    }
-}
-
-void write_byte(Bytecode_Writer *writer, int8_t v)
-{
-    ensure_bytes_fit(writer, 1);
-    writer->code[writer->len] = v;
-    writer->len++;
-}
-
-void write_float(Bytecode_Writer *writer, float v)
-{
-    ensure_bytes_fit(writer, 4);
-    *(float*)&writer->code[writer->len] = v;
-    writer->len += 4;
-}
-
-void write_vec4(Bytecode_Writer *writer, float x, float y, float z, float w)
-{
-    ensure_bytes_fit(writer, 16);
-    float *v = (float*)&writer->code[writer->len];
-    v[0] = x;
-    v[1] = y;
-    v[2] = z;
-    v[3] = w;
-    writer->len += 16;
-}
-
-void write_op(Bytecode_Writer *writer, Particle_Bytecode_OP op)
-{
-    write_byte(writer, (uint8_t)op);
-}
-
-void write_target_reg(Bytecode_Writer *writer, uint8_t target_reg)
-{
-    write_byte(writer, target_reg & 0xf);
-}
-
-void write_target_source_regs(Bytecode_Writer *writer, uint8_t target_reg, uint8_t source_reg)
-{
-    write_byte(writer, (target_reg & 0xf) | (source_reg << 4));
-}
-
-void write_target_source2_regs(Bytecode_Writer *writer, uint8_t target_reg, uint8_t source_reg1, uint8_t source_reg2)
-{
-    uint8_t source_regs = (source_reg1 & 0x3) | ((source_reg2 & 0x3) << 2);
-    write_byte(writer, (target_reg & 0xf) | (source_regs << 4));
-}
-
-void write_bytecode(Particle_Bytecode *bytecode)
-{
-    Bytecode_Writer writer = { };
-
-    write_op(&writer, PBOP_LOAD_CONST);
-    write_target_reg(&writer, 0);
-    write_vec4(&writer, 4.0f, 3.0f, -2.0f, 3.14f);
-
-    write_op(&writer, PBOP_LOAD_CONST);
-    write_target_reg(&writer, 1);
-    write_vec4(&writer, 2.0f, 10.0f, 21.0f, 1.14f);
-
-    write_op(&writer, PBOP_ADD);
-    write_target_source_regs(&writer, 0, 1);
-
-    write_op(&writer, PBOP_LOAD_CONST);
-    write_target_reg(&writer, 2);
-    write_vec4(&writer, 0.0f, 1.0f, 0.5f, 0.15f);
-
-    write_op(&writer, PBOP_INTERP);
-    write_target_source2_regs(&writer, 0, 1, 2);
-
-    bytecode->len = writer.len;
-    bytecode->code = writer.code;
-}
-
-void free_bytecode(Particle_Bytecode *bytecode)
-{
-    free(bytecode->code);
-    *bytecode = { };
-}
-
-int main_simple_bc(int argc, char **argv)
-{
-    (void)argc;
-    (void)argv;
-    Particle_Bytecode bytecode = { };
-    write_bytecode(&bytecode);
-
-    printf("bytecode len = %d\n", bytecode.len);
-
-    Particle_VM_State state = { };
-    exec(state, nullptr, &bytecode);
-
-    Reg r0 = state.r[0];
-    printf("r0 = %.3f, %.3f, %.3f %.3f\n", r0.v[0], r0.v[1], r0.v[2], r0.v[3]);
-
-    return 0;
-}
-*/
-
 void report_compile_error(const char *err)
 {
     printf("Error: %s\n", err);
@@ -273,11 +157,13 @@ void print_il(FXVM_ILContext *ctx)
     }
 }
 
+/*
 const char *source = "\
 v = sqrt(vec2(1.0,2.0)) * Particle_life_time;\
 v + vec2(0.5,0.5);\
 v3 = vec3(3, 2, 1);\n\
 ";
+*/
 /*
 x = v3.x;\n\
 yxz = v3.yxz;\n\
@@ -296,7 +182,13 @@ v4 = vec4(v3, v);\n\
 // mov_xy r0 <- r2 z
 // mov_xyz r0 <- 0.0
 // mov_xyzw r0 <- r2 x
-//
+
+#define SOURCE(x) #x
+
+const char *source = SOURCE(
+t = sin(Particle_life_time);
+lerp(vec3(0, -1, 0), vec3(10, 10, 10), t);
+);
 
 int main(int argc, char **argv)
 {
@@ -321,8 +213,8 @@ int main(int argc, char **argv)
 
     {
         float input[16] = {10.0f, 10.0f, 12.0f, 15.0f, 0.0f};
-        Particle_Bytecode bytecode = { compiler.codegen.buffer_len, compiler.codegen.buffer };
-        Particle_VM_State state = { };
+        FXVM_Bytecode bytecode = { compiler.codegen.buffer_len, compiler.codegen.buffer };
+        FXVM_State state = { };
         exec(state, (uint8_t*)input, &bytecode);
 
         printf("---\n");

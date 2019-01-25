@@ -47,30 +47,31 @@ void particle_update(ParticleData *input, void *particle_system_data)
  * t  target: which register is the target (4 bits)
 */
 
-struct Particle_Bytecode
+struct FXVM_Bytecode
 {
     int len;
     uint8_t *code;
 };
 
-struct Particle_VM_State
+struct FXVM_State
 {
     enum { MAX_REGS = 16 };
     Reg r[MAX_REGS];
 };
 
-struct InputSetup
-{
+//#define TRACE_FXVM
 
-};
+#ifdef TRACE_FXVM
+#define FXVM_TRACE_OP() printf("%-18s ", fxvm_opcode_string[opcode])
+#define FXVM_TRACE(fmt, ...) printf(fmt, ## __VA_ARGS__)
+#define FXVM_TRACE_REG(i) printf("r%d={%.3f, %.3f, %.3f, %.3f}", i, S.r[i].v[0], S.r[i].v[1], S.r[i].v[2], S.r[i].v[3])
+#else
+#define FXVM_TRACE_OP()
+#define FXVM_TRACE(fmt, ...)
+#define FXVM_TRACE_REG(i)
+#endif
 
-/*
-void setup_input(InputSetup *setup, int input_count, void *input)
-{
-}
-*/
-
-void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
+void exec(FXVM_State &S, uint8_t *input, FXVM_Bytecode *bytecode)
 {
     const uint8_t *end = bytecode->code + bytecode->len;
     const uint8_t *p = bytecode->code;
@@ -85,8 +86,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_load(p + 2);
                 p += 16 + 2;
 
-                auto r = S.r[target_reg];
-                printf("load const %d <- %.3f %.3f %.3f %.3f\n", target_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- const: ", target_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_LOAD_INPUT:
             {
@@ -95,8 +98,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_load(input + input_offset);
                 p += 3;
 
-                auto r = S.r[target_reg];
-                printf("load input %d <- [%d] (%.3f %.3f %.3f %.3f)\n", target_reg, input_offset, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- [%d]: ", target_reg, input_offset);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_SWIZZLE:
             {
@@ -105,6 +110,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t swizzle_mask = p[2];
                 S.r[target_reg] = reg_swizzle(S.r[source_reg], swizzle_mask);
                 p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d MASK %02x: ", target_reg, source_reg, swizzle_mask);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MOV:
             {
@@ -113,7 +123,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = S.r[source_reg];
                 p += 2;
 
-                printf("mov x %d <- %d\n", target_reg, source_reg);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MOV_X:
             {
@@ -122,8 +135,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_mov_x(S.r[x_reg]);
                 p += 2;
 
-                auto r = S.r[target_reg];
-                printf("mov x %d <- (%.3f %.3f %.3f %.3f)\n", target_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, x_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MOV_XY:
             {
@@ -133,8 +148,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_mov_xy(S.r[x_reg], S.r[y_reg]);
                 p += 3;
 
-                auto r = S.r[target_reg];
-                printf("mov xy %d <- (%.3f %.3f %.3f %.3f)\n", target_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, x_reg, y_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MOV_XYZ:
             {
@@ -145,8 +162,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_mov_xyz(S.r[x_reg], S.r[y_reg], S.r[z_reg]);
                 p += 3;
 
-                auto r = S.r[target_reg];
-                printf("mov xyz %d <- (%.3f %.3f %.3f %.3f)\n", target_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d r%d: ", target_reg, x_reg, y_reg, z_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MOV_XYZW:
             {
@@ -158,8 +177,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_mov_xyzw(S.r[x_reg], S.r[y_reg], S.r[z_reg], S.r[w_reg]);
                 p += 4;
 
-                auto r = S.r[target_reg];
-                printf("mov xyzw %d <- (%.3f %.3f %.3f %.3f)\n", target_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d r%d r%d: ", target_reg, x_reg, y_reg, z_reg, w_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MOV_MASK:
             {
@@ -171,6 +192,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg].v[2] = (mov_mask & 4) ? S.r[source_reg].v[2] : S.r[target_reg].v[2];
                 S.r[target_reg].v[3] = (mov_mask & 8) ? S.r[source_reg].v[3] : S.r[target_reg].v[3];
                 p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d MASK %x: ", target_reg, source_reg, mov_mask);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_NEG:
             {
@@ -178,6 +204,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = reg_neg(S.r[source_reg]);
                 p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_ADD:
             {
@@ -187,8 +218,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_add(S.r[a_reg], S.r[b_reg]);
                 p += 3;
 
-                auto r = S.r[target_reg];
-                printf("add %d <- %d + %d (%.3f %.3f %.3f %.3f)\n", target_reg, a_reg, b_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_SUB:
             {
@@ -198,8 +231,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_sub(S.r[a_reg], S.r[b_reg]);
                 p += 3;
 
-                auto r = S.r[target_reg];
-                printf("sub %d <- %d - %d (%.3f %.3f %.3f %.3f)\n", target_reg, a_reg, b_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MUL:
             {
@@ -209,8 +244,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_mul(S.r[a_reg], S.r[b_reg]);
                 p += 3;
 
-                auto r = S.r[target_reg];
-                printf("mul %d <- %d * %d (%.3f %.3f %.3f %.3f)\n", target_reg, a_reg, b_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_DIV:
             {
@@ -220,8 +257,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_div(S.r[a_reg], S.r[b_reg]);
                 p += 3;
 
-                auto r = S.r[target_reg];
-                printf("div %d <- %d / %d (%.3f %.3f %.3f %.3f)\n", target_reg, a_reg, b_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         //case FXOP_FMA:
         case FXOP_RCP:
@@ -231,8 +270,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_rcp(S.r[source_reg]);
                 p += 2;
 
-                auto r = S.r[target_reg];
-                printf("rcp %d <- %d (%.3f %.3f %.3f %.3f)\n", target_reg, source_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_RSQRT:
             {
@@ -241,8 +282,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_rsqrt(S.r[source_reg]);
                 p += 2;
 
-                auto r = S.r[target_reg];
-                printf("rsqrt %d <- %d (%.3f %.3f %.3f %.3f)\n", target_reg, source_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_SQRT:
             {
@@ -251,8 +294,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_sqrt(S.r[source_reg]);
                 p += 2;
 
-                auto r = S.r[target_reg];
-                printf("sqrt %d <- %d (%.3f %.3f %.3f %.3f)\n", target_reg, source_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_SIN:
             {
@@ -261,8 +306,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_sin(S.r[source_reg]);
                 p += 2;
 
-                auto r = S.r[target_reg];
-                printf("sin %d <- %d (%.3f %.3f %.3f %.3f)\n", target_reg, source_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_COS:
             {
@@ -271,8 +318,10 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 S.r[target_reg] = reg_cos(S.r[source_reg]);
                 p += 2;
 
-                auto r = S.r[target_reg];
-                printf("cos %d <- %d (%.3f %.3f %.3f %.3f)\n", target_reg, source_reg, r.v[0], r.v[1], r.v[2], r.v[3]);
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_EXP:
             {
@@ -280,6 +329,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = reg_exp(S.r[source_reg]);
                 p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_EXP2:
             {
@@ -287,6 +341,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = reg_exp2(S.r[source_reg]);
                 p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_EXP10:
             {
@@ -294,6 +353,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = reg_exp10(S.r[source_reg]);
                 p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         //case FXOP_DOT:
         case FXOP_ABS:
@@ -302,22 +366,37 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = reg_abs(S.r[source_reg]);
                 p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MIN:
             {
                 uint8_t target_reg = p[1] & 0xf;
-                uint8_t source_reg1 = (p[1] >> 4) & 0xf;
-                uint8_t source_reg2 = p[2] & 0xf;
-                S.r[target_reg] = reg_min(S.r[source_reg1], S.r[source_reg2]);
+                uint8_t a_reg = (p[1] >> 4) & 0xf;
+                uint8_t b_reg = p[2] & 0xf;
+                S.r[target_reg] = reg_min(S.r[a_reg], S.r[b_reg]);
                 p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_MAX:
             {
                 uint8_t target_reg = p[1] & 0xf;
-                uint8_t source_reg1 = (p[1] >> 4) & 0xf;
-                uint8_t source_reg2 = p[2] & 0xf;
-                S.r[target_reg] = reg_max(S.r[source_reg1], S.r[source_reg2]);
+                uint8_t a_reg = (p[1] >> 4) & 0xf;
+                uint8_t b_reg = p[2] & 0xf;
+                S.r[target_reg] = reg_max(S.r[a_reg], S.r[b_reg]);
                 p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_CLAMP01:
             {
@@ -325,6 +404,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = reg_clamp01(S.r[source_reg]);
                 p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_CLAMP:
             {
@@ -334,6 +418,11 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t b_reg = (p[2] >> 4) & 0xf;
                 S.r[target_reg] = reg_clamp(S.r[x_reg], S.r[a_reg], S.r[b_reg]);
                 p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d r%d: ", target_reg, x_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
         case FXOP_INTERP:
             {
@@ -343,7 +432,15 @@ void exec(Particle_VM_State &S, uint8_t *input, Particle_Bytecode *bytecode)
                 uint8_t b_reg = (p[2] >> 4) & 0xf;
                 S.r[target_reg] = reg_interp(S.r[a_reg], S.r[b_reg], S.r[t_reg]);
                 p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d r%d: ", target_reg, t_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
             } break;
+        default:
+            printf("ICE: invalid opcode %d\n", opcode);fflush(stdout);
+            return;
         }
     }
 }

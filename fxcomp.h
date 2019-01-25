@@ -221,6 +221,7 @@ bool tokenize(FXVM_Compiler *compiler, const char *source, const char *source_en
             break;
         }
     }
+    printf("Tokenization done!\n"); fflush(stdout);
     return compiler->error_num == 0;
 }
 
@@ -626,6 +627,7 @@ bool parse(FXVM_Compiler *compiler)
         tokens.t++;
     }
     compiler->ast = ast;
+    printf("Parsing done!\n"); fflush(stdout);
     return compiler->error_num == 0;
 }
 
@@ -973,8 +975,8 @@ FXVM_Type type_check_call(FXVM_Compiler *compiler, FXVM_Ast *ast)
             if (gen_type == FXTYP_NONE)
             {
                 gen_type = param_type;
-                def_param_type = param_type;
             }
+            def_param_type = param_type;
         }
 
         if (param_type != def_param_type)
@@ -1444,7 +1446,7 @@ FXIL_Reg emit_lerp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
     FXIL_Reg param_a = generate_expr(compiler, ctx, call->call.params.nodes[0]);
     FXIL_Reg param_b = generate_expr(compiler, ctx, call->call.params.nodes[1]);
     FXIL_Reg param_t = generate_expr(compiler, ctx, call->call.params.nodes[2]);
-    push_il(ctx, FXIL_CLAMP, result, param_t, param_a, param_b);
+    push_il(ctx, FXIL_INTERP, result, param_t, param_a, param_b);
     return result;
 }
 
@@ -1582,6 +1584,7 @@ bool generate_il(FXVM_Compiler *compiler)
     {
         generate_expr(compiler, &compiler->il_context, root.nodes[i]);
     }
+    printf("IL generation done!\n"); fflush(stdout);
     return true;
 }
 
@@ -1603,6 +1606,8 @@ struct Registers
 
     int span_num;
     Span *spans;
+
+    bool is_last_instr; // For special casing
 };
 
 void free_registers(Registers *regs, int instruction_index)
@@ -1619,6 +1624,7 @@ void free_registers(Registers *regs, int instruction_index)
 int allocate_register(FXVM_Codegen *gen, Registers *regs, FXIL_Reg pseudo_reg, int valid_mask = 0xff)
 {
     (void)gen;
+    if (regs->is_last_instr) return 0;
     for (int i = 0; i < Registers::MAX_REGS; i++)
     {
         if ((i & valid_mask) == 0) continue;
@@ -1887,7 +1893,7 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
             int x_reg = get_register(regs, instr->read_operands[0]);
             int a_reg = get_register(regs, instr->read_operands[1]);
             int b_reg = get_register(regs, instr->read_operands[2]);
-            write_op(gen, FXOP_CLAMP01);
+            write_op(gen, FXOP_CLAMP);
             write_regs(gen, target_reg, x_reg);
             write_regs(gen, a_reg, b_reg);
         } break;
@@ -1897,7 +1903,7 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
             int t_reg = get_register(regs, instr->read_operands[0]);
             int a_reg = get_register(regs, instr->read_operands[1]);
             int b_reg = get_register(regs, instr->read_operands[2]);
-            write_op(gen, FXOP_CLAMP01);
+            write_op(gen, FXOP_INTERP);
             write_regs(gen, target_reg, t_reg);
             write_regs(gen, a_reg, b_reg);
         } break;
@@ -2010,12 +2016,21 @@ bool write_bytecode(FXVM_Compiler *compiler)
     initialize_spans(compiler, &regs);
 
     auto instructions = compiler->il_context.instructions;
-    for (int i = 0; i < compiler->il_context.instr_num; i++)
+    int instr_num = compiler->il_context.instr_num;
+    if (instr_num > 0)
     {
-        write_instruction(gen, &regs, &instructions[i]);
-        free_registers(&regs, i);
+        for (int instr_i = 0; instr_i < instr_num - 1; instr_i++)
+        {
+            write_instruction(gen, &regs, &instructions[instr_i]);
+            free_registers(&regs, instr_i);
+        }
+        int last_instr_i = instr_num - 1;
+        regs.is_last_instr = true;
+        write_instruction(gen, &regs, &instructions[last_instr_i]);
+        free_registers(&regs, last_instr_i);
     }
 
+#if 0
     // Ensure the last write is returned in r0
     if (compiler->il_context.instr_num > 0)
     {
@@ -2028,7 +2043,9 @@ bool write_bytecode(FXVM_Compiler *compiler)
             write_regs(gen, 0, target_reg);
         }
     }
+#endif
 
+    printf("Bytecode writing done!\n"); fflush(stdout);
     return true;
 }
 
@@ -2089,6 +2106,45 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
 
     int sqrt_i = register_builtin_function(compiler, "sqrt", FXTYP_GENF, 1);
     set_function_parameter_type(compiler, sqrt_i, 0, FXTYP_GENF);
+
+    int sin_i = register_builtin_function(compiler, "sin", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, sin_i, 0, FXTYP_GENF);
+
+    int cos_i = register_builtin_function(compiler, "cos", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, cos_i, 0, FXTYP_GENF);
+
+    int exp_i = register_builtin_function(compiler, "exp", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, exp_i, 0, FXTYP_GENF);
+
+    int exp2_i = register_builtin_function(compiler, "exp2", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, exp2_i, 0, FXTYP_GENF);
+
+    int exp10_i = register_builtin_function(compiler, "exp10", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, exp10_i, 0, FXTYP_GENF);
+
+    int abs_i = register_builtin_function(compiler, "abs", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, abs_i, 0, FXTYP_GENF);
+
+    int min_i = register_builtin_function(compiler, "min", FXTYP_GENF, 2);
+    set_function_parameter_type(compiler, min_i, 0, FXTYP_GENF);
+    set_function_parameter_type(compiler, min_i, 1, FXTYP_GENF);
+
+    int max_i = register_builtin_function(compiler, "max", FXTYP_GENF, 2);
+    set_function_parameter_type(compiler, max_i, 0, FXTYP_GENF);
+    set_function_parameter_type(compiler, max_i, 1, FXTYP_GENF);
+
+    int clamp01_i = register_builtin_function(compiler, "clamp01", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, clamp01_i, 0, FXTYP_GENF);
+
+    int clamp_i = register_builtin_function(compiler, "clamp", FXTYP_GENF, 3);
+    set_function_parameter_type(compiler, clamp_i, 0, FXTYP_GENF);
+    set_function_parameter_type(compiler, clamp_i, 1, FXTYP_GENF);
+    set_function_parameter_type(compiler, clamp_i, 2, FXTYP_GENF);
+
+    int lerp_i = register_builtin_function(compiler, "lerp", FXTYP_GENF, 3);
+    set_function_parameter_type(compiler, lerp_i, 0, FXTYP_GENF);
+    set_function_parameter_type(compiler, lerp_i, 1, FXTYP_GENF);
+    set_function_parameter_type(compiler, lerp_i, 2, FXTYP_F1);
 
     bool result =
         tokenize(compiler, source, source_end) &&

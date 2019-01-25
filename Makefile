@@ -1,10 +1,16 @@
 
 .PHONY: build run
 
-build: main.cpp fxvm.h fxreg.h
+build: particles.cpp
+	g++ -Og -g -Wall -Wextra -fno-rtti -fno-exceptions -o particles-main particles.cpp -lopengl32 -lgdi32
+
+build_fxvm: main.cpp fxvm.h fxreg.h
 	g++ -Og -g -Wall -Wextra -fno-rtti -fno-exceptions -o fxvm-main main.cpp
 
-run: fxvm-main.exe
+run: particles-main.exe
+	./particles-main
+
+run_fxvm: fxvm-main.exe
 	./fxvm-main
 
 run_debug: fxvm-main.exe
