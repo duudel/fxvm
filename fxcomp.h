@@ -1031,6 +1031,7 @@ enum FXVM_ILOp
 {
     FXIL_LOAD_CONST,
     FXIL_LOAD_INPUT,
+    FXIL_LOAD_ATTRIB,
     FXIL_MOV,
     FXIL_MOV_X,
     FXIL_MOV_XY,
@@ -1065,32 +1066,33 @@ struct FXVM_ILInstrInfo
 };
 
 FXVM_ILInstrInfo il_instr_info[] = {
-    [FXIL_LOAD_CONST] = {"FXIL_LOAD_CONST", 1},
-    [FXIL_LOAD_INPUT] = {"FXIL_LOAD_INPUT", 1},
-    [FXIL_MOV] =        {"FXIL_MOV", 2},
-    [FXIL_MOV_X] =      {"FXIL_MOV_X", 2},
-    [FXIL_MOV_XY] =     {"FXIL_MOV_XY", 3},
-    [FXIL_MOV_XYZ] =    {"FXIL_MOV_XYZ", 4},
-    [FXIL_MOV_XYZW] =   {"FXIL_MOV_XYZW", 5},
-    [FXIL_NEG] =        {"FXIL_NEG", 2},
-    [FXIL_ADD] =        {"FXIL_ADD", 3},
-    [FXIL_SUB] =        {"FXIL_SUB", 3},
-    [FXIL_MUL] =        {"FXIL_MUL", 3},
-    [FXIL_DIV] =        {"FXIL_DIV", 3},
-    [FXIL_RCP] =        {"FXIL_RCP", 2},
-    [FXIL_RSQRT] =      {"FXIL_RSQRT", 2},
-    [FXIL_SQRT] =       {"FXIL_SQRT", 2},
-    [FXIL_SIN] =        {"FXIL_SIN", 2},
-    [FXIL_COS] =        {"FXIL_COS", 2},
-    [FXIL_EXP] =        {"FXIL_EXP", 2},
-    [FXIL_EXP2] =       {"FXIL_EXP2", 2},
-    [FXIL_EXP10] =      {"FXIL_EXP10", 2},
-    [FXIL_ABS] =        {"FXIL_ABS", 2},
-    [FXIL_MIN] =        {"FXIL_MIN", 3},
-    [FXIL_MAX] =        {"FXIL_MAX", 3},
-    [FXIL_CLAMP01] =    {"FXIL_CLAMP01", 2},
-    [FXIL_CLAMP] =      {"FXIL_CLAMP", 4},
-    [FXIL_INTERP] =     {"FXIL_INTERP", 4},
+    [FXIL_LOAD_CONST] =  {"FXIL_LOAD_CONST", 1},
+    [FXIL_LOAD_INPUT] =  {"FXIL_LOAD_INPUT", 1},
+    [FXIL_LOAD_ATTRIB] = {"FXIL_LOAD_ATTRIB", 1},
+    [FXIL_MOV] =         {"FXIL_MOV", 2},
+    [FXIL_MOV_X] =       {"FXIL_MOV_X", 2},
+    [FXIL_MOV_XY] =      {"FXIL_MOV_XY", 3},
+    [FXIL_MOV_XYZ] =     {"FXIL_MOV_XYZ", 4},
+    [FXIL_MOV_XYZW] =    {"FXIL_MOV_XYZW", 5},
+    [FXIL_NEG] =         {"FXIL_NEG", 2},
+    [FXIL_ADD] =         {"FXIL_ADD", 3},
+    [FXIL_SUB] =         {"FXIL_SUB", 3},
+    [FXIL_MUL] =         {"FXIL_MUL", 3},
+    [FXIL_DIV] =         {"FXIL_DIV", 3},
+    [FXIL_RCP] =         {"FXIL_RCP", 2},
+    [FXIL_RSQRT] =       {"FXIL_RSQRT", 2},
+    [FXIL_SQRT] =        {"FXIL_SQRT", 2},
+    [FXIL_SIN] =         {"FXIL_SIN", 2},
+    [FXIL_COS] =         {"FXIL_COS", 2},
+    [FXIL_EXP] =         {"FXIL_EXP", 2},
+    [FXIL_EXP2] =        {"FXIL_EXP2", 2},
+    [FXIL_EXP10] =       {"FXIL_EXP10", 2},
+    [FXIL_ABS] =         {"FXIL_ABS", 2},
+    [FXIL_MIN] =         {"FXIL_MIN", 3},
+    [FXIL_MAX] =         {"FXIL_MAX", 3},
+    [FXIL_CLAMP01] =     {"FXIL_CLAMP01", 2},
+    [FXIL_CLAMP] =       {"FXIL_CLAMP", 4},
+    [FXIL_INTERP] =      {"FXIL_INTERP", 4},
 };
 
 const char* il_op_to_string(FXVM_ILOp op)
@@ -1211,6 +1213,14 @@ void push_il_load_input(FXVM_ILContext *ctx, FXIL_Reg target, int input_index)
     ensure_il_instr_fits(ctx);
     int i = ctx->instr_num;
     ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_INPUT, .target = target, .input_load = {input_index} };
+    ctx->instr_num = i + 1;
+}
+
+void push_il_load_attrib(FXVM_ILContext *ctx, FXIL_Reg target, int input_index)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_LOAD_ATTRIB, .target = target, .input_load = {input_index} };
     ctx->instr_num = i + 1;
 }
 
@@ -1345,14 +1355,23 @@ FXIL_Reg generate_input_variable(FXVM_Compiler *compiler, FXVM_ILContext *ctx, F
     return target;
 }
 
+FXIL_Reg generate_attribute(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr, int sym_index)
+{
+    FXIL_Reg target = new_il_reg(ctx, expr->type);
+    int input_index = compiler->symbols.additional_data[sym_index].input_index;
+    push_il_load_attrib(ctx, target, input_index);
+    return target;
+}
+
 FXIL_Reg generate_variable_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
 {
     int sym_index = symbols_find(&compiler->symbols, expr->variable.token->start, expr->variable.token->end);
     switch (compiler->symbols.sym_types[sym_index])
     {
-    case FXSYM_Variable:        return generate_variable(compiler, ctx, expr, sym_index);
-    case FXSYM_BuiltinConstant: return generate_constant(compiler, ctx, expr, sym_index);
-    case FXSYM_InputVariable:   return generate_input_variable(compiler, ctx, expr, sym_index);
+    case FXSYM_Variable:            return generate_variable(compiler, ctx, expr, sym_index);
+    case FXSYM_BuiltinConstant:     return generate_constant(compiler, ctx, expr, sym_index);
+    case FXSYM_GlobalInputVariable: return generate_input_variable(compiler, ctx, expr, sym_index);
+    case FXSYM_Attribute: return generate_attribute(compiler, ctx, expr, sym_index);
     case FXSYM_BuiltinFunction:
         // ICE
         break;
@@ -1658,6 +1677,13 @@ void write_op(FXVM_Codegen *gen, FXVM_BytecodeOp op)
     gen->buffer_len++;
 }
 
+void write_op(FXVM_Codegen *gen, FXVM_BytecodeOp op, int width)
+{
+    ensure_bytes_fit(gen, 1);
+    gen->buffer[gen->buffer_len] = (uint8_t)op | (width << 6);
+    gen->buffer_len++;
+}
+
 void write_regs(FXVM_Codegen *gen, uint8_t target)
 {
     ensure_bytes_fit(gen, 1);
@@ -1702,7 +1728,15 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
     case FXIL_LOAD_INPUT:
         {
             int reg = allocate_register(gen, regs, instr->target);
-            write_op(gen, FXOP_LOAD_INPUT);
+            write_op(gen, FXOP_LOAD_GLOBAL_INPUT);
+            write_regs(gen, reg);
+            write_input_index(gen, instr->input_load.input_index);
+        } break;
+    case FXIL_LOAD_ATTRIB:
+        {
+            int reg = allocate_register(gen, regs, instr->target);
+            int width = (int)instr->target.type;
+            write_op(gen, FXOP_LOAD_ATTRIBUTE, width);
             write_regs(gen, reg);
             write_input_index(gen, instr->input_load.input_index);
         } break;
@@ -1960,6 +1994,7 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
         {
             case FXIL_LOAD_CONST:
             case FXIL_LOAD_INPUT:
+            case FXIL_LOAD_ATTRIB:
                 break;
             case FXIL_MOV:
                 read_from(regs, instructions[i].read_operands[0], i);
@@ -2093,13 +2128,23 @@ void set_function_parameter_type(FXVM_Compiler *compiler, int sym_index, int par
     compiler->symbols.function_types[sym_index].parameter_types[param_index] = param_type;
 }
 
-int register_input_variable(FXVM_Compiler *compiler, const char *name, FXVM_Type type)
+int register_global_input_variable(FXVM_Compiler *compiler, const char *name, FXVM_Type type)
 {
     int sym_index = push_symbol(&compiler->symbols, name, name + strlen(name), type);
-    int input_index = compiler->symbols.input_index;
+    int input_index = compiler->symbols.global_input_index;
     compiler->symbols.additional_data[sym_index].input_index = input_index;
-    compiler->symbols.sym_types[sym_index] = FXSYM_InputVariable;
-    compiler->symbols.input_index = input_index + (int)type;
+    compiler->symbols.sym_types[sym_index] = FXSYM_GlobalInputVariable;
+    compiler->symbols.global_input_index = input_index + (int)type;
+    return input_index;
+}
+
+int register_attribute(FXVM_Compiler *compiler, const char *name, FXVM_Type type)
+{
+    int sym_index = push_symbol(&compiler->symbols, name, name + strlen(name), type);
+    int input_index = compiler->symbols.attribute_index;
+    compiler->symbols.additional_data[sym_index].input_index = input_index;
+    compiler->symbols.sym_types[sym_index] = FXSYM_Attribute;
+    compiler->symbols.attribute_index = input_index + 1;
     return input_index;
 }
 

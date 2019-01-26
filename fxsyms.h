@@ -7,10 +7,11 @@
 enum FXVM_SymbolType
 {
     FXSYM_Variable,
-
-    FXSYM_InputVariable,
     FXSYM_BuiltinConstant,
     FXSYM_BuiltinFunction,
+
+    FXSYM_GlobalInputVariable,
+    FXSYM_Attribute,
 };
 
 struct FXVM_SymbolAdditionalData
@@ -18,6 +19,11 @@ struct FXVM_SymbolAdditionalData
     union {
         int variable_reg;
         float constant[4];
+
+        /* Input index is used by GlobalInputVariable or PerInstanceInputVariable.
+         * In case of global input variable, it is the index/offset to the global input variable memory.
+         * In case of instance input variable, it is the index to the array of per instance attributes.
+         */
         int input_index;
     };
 };
@@ -45,7 +51,8 @@ struct FXVM_Symbols
 
     FXVM_SymbolAdditionalData *additional_data;
 
-    int input_index;
+    int global_input_index;
+    int attribute_index;
 };
 
 void ensure_symbol_fits(FXVM_Symbols *syms)

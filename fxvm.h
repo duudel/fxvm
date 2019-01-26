@@ -62,7 +62,7 @@ struct FXVM_State
 //#define TRACE_FXVM
 
 #ifdef TRACE_FXVM
-#define FXVM_TRACE_OP() printf("%-18s ", fxvm_opcode_string[opcode])
+#define FXVM_TRACE_OP() printf("%-18s ", fxvm_opcode_string[opcode] + 5)
 #define FXVM_TRACE(fmt, ...) printf(fmt, ## __VA_ARGS__)
 #define FXVM_TRACE_REG(i) printf("r%d={%.3f, %.3f, %.3f, %.3f}", i, S.r[i].v[0], S.r[i].v[1], S.r[i].v[2], S.r[i].v[3])
 #else
@@ -71,12 +71,13 @@ struct FXVM_State
 #define FXVM_TRACE_REG(i)
 #endif
 
-void exec(FXVM_State &S, float *input, FXVM_Bytecode *bytecode)
+void exec(FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode)
 {
     const uint8_t *end = bytecode->code + bytecode->len;
     const uint8_t *p = bytecode->code;
     while (p < end)
     {
+        // ww opopop
         auto opcode = (FXVM_BytecodeOp)(p[0] & 0x3f);
         switch (opcode)
         {
@@ -91,15 +92,29 @@ void exec(FXVM_State &S, float *input, FXVM_Bytecode *bytecode)
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;
-        case FXOP_LOAD_INPUT:
+        case FXOP_LOAD_GLOBAL_INPUT:
             {
                 uint8_t target_reg = p[1] & 0xf;
                 uint8_t input_offset = p[2];
-                S.r[target_reg] = reg_load((uint8_t*)(input + input_offset));
+                S.r[target_reg] = reg_load((uint8_t*)(global_input + input_offset));
                 p += 3;
 
                 FXVM_TRACE_OP();
                 FXVM_TRACE("r%d <- [%d]: ", target_reg, input_offset);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_LOAD_ATTRIBUTE:
+            {
+                uint8_t width = p[0] >> 6;
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t input_attribute = p[2];
+                float *attribute_data = instance_attributes[input_attribute];
+                S.r[target_reg] = reg_load((uint8_t*)(attribute_data + instance_index * width));
+                p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- [%d][%d]: ", target_reg, instance_index, input_attribute);
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;

@@ -19,6 +19,12 @@ LRESULT CALLBACK WindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
                 return 0;
             }
         } break;
+        case WM_SIZE:
+        {
+            int width = LOWORD(lparam);
+            int height = HIWORD(lparam);
+            glViewport(0, 0, width, height);
+        } break;
         case WM_CLOSE:
             running = false;
             return 0;
@@ -195,6 +201,7 @@ struct Particles
     vec3 acceleration[MAX];
     float life_seconds[MAX];
     float life_max[MAX];
+    float life_01[MAX];
     float size[MAX];
     vec3 color[MAX];
     vec4 random[MAX];
@@ -225,9 +232,9 @@ struct Particle_System
     FXVM_Bytecode color;
     FXVM_Bytecode size;
 
-    int life_i;
-    int velocity_i;
-    int particle_random_i;
+    int attrib_life;
+    int attrib_velocity;
+    int attrib_particle_random;
 
     int random_i;
 };
@@ -257,6 +264,7 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
             float initial_life = E->life + random01();
             P->life_seconds[index] = initial_life;
             P->life_max[index] = initial_life;
+            P->life_01[index] = 0.0f;
             P->size[index] = 0.01f;
             P->color[index] = vec3{1.0f, 1.0f, 1.0f};
             P->random[index] = vec4{random01(), random01(), random01(), random01()};
@@ -270,17 +278,17 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
     E->last_index = last_i;
 }
 
-float eval_f1(float *input, FXVM_Bytecode bytecode)
+float eval_f1(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
 {
     FXVM_State state = { };
-    exec(state, input, &bytecode);
+    exec(state, input, attributes, instance_index, &bytecode);
     return state.r[0].v[0];
 }
 
-vec3 eval_f3(float *input, FXVM_Bytecode bytecode)
+vec3 eval_f3(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
 {
     FXVM_State state = { };
-    exec(state, input, &bytecode);
+    exec(state, input, attributes, instance_index, &bytecode);
     auto r = state.r[0];
     return vec3{r.v[0], r.v[1], r.v[2]};
 }
@@ -292,27 +300,25 @@ void simulate(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
     float drag = PS->emitter.drag;
 
     float global_input[16];
+    float *attributes[16];
+    attributes[PS->attrib_life] = P->life_01;
+    attributes[PS->attrib_velocity] = (float*)&P->velocity;
+    attributes[PS->attrib_particle_random] = (float*)&P->random;
+
     for (int i = 0; i < Particles::MAX; i++)
     {
         if (P->life_seconds[i] > 0.0f)
         {
-            global_input[PS->life_i] = 1.0f - P->life_seconds[i] * (1.0f / P->life_max[i]);
-            global_input[PS->velocity_i+0] = P->velocity[i].x;
-            global_input[PS->velocity_i+1] = P->velocity[i].y;
-            global_input[PS->velocity_i+2] = P->velocity[i].z;
-            global_input[PS->particle_random_i+0] = P->random[i].x;
-            global_input[PS->particle_random_i+1] = P->random[i].y;
-            global_input[PS->particle_random_i+2] = P->random[i].z;
-            global_input[PS->particle_random_i+3] = P->random[i].w;
-
             global_input[PS->random_i] = random01();
 
             P->life_seconds[i] -= dt;
             if (P->life_seconds[i] < 0.0f) P->life_seconds[i] = 0.0f;
+            P->life_01[i] = 1.0f - P->life_seconds[i] * (1.0f / P->life_max[i]);
+
             P->velocity[i] = (P->velocity[i] + P->acceleration[i] * dt) * drag;
             P->position[i] = P->position[i] + P->velocity[i] * dt;
-            P->size[i] = eval_f1(global_input, PS->size);
-            P->color[i] = eval_f3(global_input, PS->color);
+            P->size[i] = eval_f1(global_input, attributes, i, PS->size);
+            P->color[i] = eval_f3(global_input, attributes, i, PS->color);
             //printf("P color: %.2f %.2f %.2f\n", P->color[i].x, P->color[i].y, P->color[i].z);
 
             E->particles_alive++;
@@ -354,10 +360,11 @@ FXVM_Bytecode compile(Particle_System *PS, const char *source)
     FXVM_Compiler compiler = { };
     compiler.report_error = report_compile_error;
 
-    PS->life_i = register_input_variable(&compiler, "particle_life", FXTYP_F1);
-    PS->velocity_i = register_input_variable(&compiler, "particle_velocity", FXTYP_F3);
-    PS->particle_random_i = register_input_variable(&compiler, "particle_random", FXTYP_F1);
-    PS->random_i = register_input_variable(&compiler, "random01", FXTYP_F1);
+    PS->random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
+
+    PS->attrib_life = register_attribute(&compiler, "particle_life", FXTYP_F1);
+    PS->attrib_velocity = register_attribute(&compiler, "particle_velocity", FXTYP_F3);
+    PS->attrib_particle_random = register_attribute(&compiler, "particle_random", FXTYP_F1);
 
     compile(&compiler, source, source + strlen(source));
     return { compiler.codegen.buffer_len, compiler.codegen.buffer };
@@ -378,12 +385,6 @@ Particle_System load_psys()
         c0 = lerp(vec3(1.0, 1.0, 0.5), vec3(1.0, 0.5, 0.0), clamp01(particle_life * 2.0));
         lerp(c0, vec3(0.5, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
     ));
-    //lerp(vec3(1.0, 1.0, 0.2), vec3(1.0, 0.0, 0.0), particle_life);
-/*SOURCE(
-    r = sin(particle_life * 6.0);
-    g = cos(particle_life * 4.0);
-    clamp01(vec3(r, g, g));
-));*/
     return result;
 }
 
