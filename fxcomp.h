@@ -221,7 +221,6 @@ bool tokenize(FXVM_Compiler *compiler, const char *source, const char *source_en
             break;
         }
     }
-    printf("Tokenization done!\n"); fflush(stdout);
     return compiler->error_num == 0;
 }
 
@@ -627,7 +626,6 @@ bool parse(FXVM_Compiler *compiler)
         tokens.t++;
     }
     compiler->ast = ast;
-    printf("Parsing done!\n"); fflush(stdout);
     return compiler->error_num == 0;
 }
 
@@ -1598,7 +1596,6 @@ bool generate_il(FXVM_Compiler *compiler)
     {
         generate_expr(compiler, &compiler->il_context, root.nodes[i]);
     }
-    printf("IL generation done!\n"); fflush(stdout);
     return true;
 }
 
@@ -2099,7 +2096,6 @@ bool write_bytecode(FXVM_Compiler *compiler)
     }
 #endif
 
-    printf("Bytecode writing done!\n"); fflush(stdout);
     return true;
 }
 
