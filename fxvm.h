@@ -71,7 +71,7 @@ struct FXVM_State
 #define FXVM_TRACE_REG(i)
 #endif
 
-void exec(FXVM_State &S, uint8_t *input, FXVM_Bytecode *bytecode)
+void exec(FXVM_State &S, float *input, FXVM_Bytecode *bytecode)
 {
     const uint8_t *end = bytecode->code + bytecode->len;
     const uint8_t *p = bytecode->code;
@@ -95,7 +95,7 @@ void exec(FXVM_State &S, uint8_t *input, FXVM_Bytecode *bytecode)
             {
                 uint8_t target_reg = p[1] & 0xf;
                 uint8_t input_offset = p[2];
-                S.r[target_reg] = reg_load(input + input_offset);
+                S.r[target_reg] = reg_load((uint8_t*)(input + input_offset));
                 p += 3;
 
                 FXVM_TRACE_OP();
@@ -242,6 +242,19 @@ void exec(FXVM_State &S, uint8_t *input, FXVM_Bytecode *bytecode)
                 uint8_t a_reg = (p[1] >> 4) & 0xf;
                 uint8_t b_reg = p[2] & 0xf;
                 S.r[target_reg] = reg_mul(S.r[a_reg], S.r[b_reg]);
+                p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_MUL_BY_SCALAR:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t a_reg = (p[1] >> 4) & 0xf;
+                uint8_t b_reg = p[2] & 0xf;
+                S.r[target_reg] = reg_mul_by_scalar(S.r[a_reg], S.r[b_reg]);
                 p += 3;
 
                 FXVM_TRACE_OP();
@@ -431,6 +444,20 @@ void exec(FXVM_State &S, uint8_t *input, FXVM_Bytecode *bytecode)
                 uint8_t a_reg = p[2] & 0xf;
                 uint8_t b_reg = (p[2] >> 4) & 0xf;
                 S.r[target_reg] = reg_interp(S.r[a_reg], S.r[b_reg], S.r[t_reg]);
+                p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d r%d: ", target_reg, t_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_INTERP_BY_SCALAR:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t t_reg = (p[1] >> 4) & 0xf;
+                uint8_t a_reg = p[2] & 0xf;
+                uint8_t b_reg = (p[2] >> 4) & 0xf;
+                S.r[target_reg] = reg_interp_by_scalar(S.r[a_reg], S.r[b_reg], S.r[t_reg]);
                 p += 3;
 
                 FXVM_TRACE_OP();

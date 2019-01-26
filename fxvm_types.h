@@ -2,12 +2,12 @@
 
 enum FXVM_Type
 {
-    FXTYP_NONE,
+    FXTYP_NONE = 0,
 
-    FXTYP_F1,
-    FXTYP_F2,
-    FXTYP_F3,
-    FXTYP_F4,
+    FXTYP_F1 = 1,
+    FXTYP_F2 = 2,
+    FXTYP_F3 = 3,
+    FXTYP_F4 = 4,
 
     FXTYP_FUNC,
 

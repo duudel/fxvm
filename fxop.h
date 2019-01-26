@@ -15,6 +15,7 @@ enum FXVM_BytecodeOp
     FXOP_ADD,
     FXOP_SUB,
     FXOP_MUL,
+    FXOP_MUL_BY_SCALAR,
     FXOP_DIV,
     //FXOP_FMA,
     FXOP_RCP,
@@ -32,6 +33,7 @@ enum FXVM_BytecodeOp
     FXOP_CLAMP01,
     FXOP_CLAMP,
     FXOP_INTERP,
+    FXOP_INTERP_BY_SCALAR,
 };
 
 const char* fxvm_opcode_string[] =
@@ -49,6 +51,7 @@ const char* fxvm_opcode_string[] =
     "FXOP_ADD",
     "FXOP_SUB",
     "FXOP_MUL",
+    "FXOP_MUL_BY_SCALAR",
     "FXOP_DIV",
     //FXOP_FMA,
     "FXOP_RCP",
@@ -66,6 +69,7 @@ const char* fxvm_opcode_string[] =
     "FXOP_CLAMP01",
     "FXOP_CLAMP",
     "FXOP_INTERP",
+    "FXOP_INTERP_BY_SCALAR",
 };
 
 #define FXVM_OP

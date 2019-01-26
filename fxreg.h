@@ -47,6 +47,9 @@ inline Reg reg_sub(Reg a, Reg b)
 inline Reg reg_mul(Reg a, Reg b)
 { return { a.v[0] * b.v[0], a.v[1] * b.v[1], a.v[2] * b.v[2], a.v[3] * b.v[3] }; }
 
+inline Reg reg_mul_by_scalar(Reg a, Reg b)
+{ return { a.v[0] * b.v[0], a.v[1] * b.v[0], a.v[2] * b.v[0], a.v[3] * b.v[0] }; }
+
 inline Reg reg_div(Reg a, Reg b)
 { return { a.v[0] / b.v[0], a.v[1] / b.v[1], a.v[2] / b.v[2], a.v[3] / b.v[3] }; }
 
@@ -95,6 +98,9 @@ inline float interp(float a, float b, float t) { return a * (1.0f - t) + b * t; 
 
 inline Reg reg_interp(Reg a, Reg b, Reg t)
 { return { interp(a.v[0], b.v[0], t.v[0]), interp(a.v[1], b.v[1], t.v[1]), interp(a.v[2], b.v[2], t.v[2]), interp(a.v[3], b.v[3], t.v[3]) }; }
+
+inline Reg reg_interp_by_scalar(Reg a, Reg b, Reg t)
+{ return { interp(a.v[0], b.v[0], t.v[0]), interp(a.v[1], b.v[1], t.v[0]), interp(a.v[2], b.v[2], t.v[0]), interp(a.v[3], b.v[3], t.v[0]) }; }
 
 #define FXVM_REG
 #endif

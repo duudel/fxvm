@@ -120,6 +120,7 @@ struct Particles
     float life_seconds[MAX];
     float life_max[MAX];
     float size[MAX];
+    vec3 color[MAX];
 };
 
 #include <cmath>
@@ -155,6 +156,7 @@ void emit(Emitter *E, Particles *P, float dt)
             P->life_seconds[index] = initial_life;
             P->life_max[index] = initial_life;
             P->size[index] = 0.01f;
+            P->color[index] = vec3{1.0f, 1.0f, 1.0f};
 
             num_to_emit--;
         }
@@ -185,21 +187,29 @@ struct Emitter_Parameters
     float rate;
     FXVM_Bytecode rate_bc;
 
+    float initial_life;
+    FXVM_Bytecode initial_life_bc;
+
     vec3 initial_velocity;
     FXVM_Bytecode initial_velocity_bc;
+
+    vec3 initial_position;
+    FXVM_Bytecode initial_position_bc;
 
     float drag;
     FXVM_Bytecode drag_bc;
 
-    vec3 initial_position;
-    FXVM_Bytecode initial_position_bc;
 };
 
 struct Particle_System
 {
     Emitter_Parameters emitter;
 
+    FXVM_Bytecode color;
     FXVM_Bytecode size;
+
+    int life_i;
+    int velocity_i;
 };
 
 void emit(Particle_System *PS, Emitter *E, Particles *P, float dt)
@@ -228,6 +238,7 @@ void emit(Particle_System *PS, Emitter *E, Particles *P, float dt)
             P->life_seconds[index] = initial_life;
             P->life_max[index] = initial_life;
             P->size[index] = 0.01f;
+            P->color[index] = vec3{1.0f, 1.0f, 1.0f};
 
             num_to_emit--;
         }
@@ -241,37 +252,55 @@ void emit(Particle_System *PS, Emitter *E, Particles *P, float dt)
 float eval_f1(float *input, FXVM_Bytecode bytecode)
 {
     FXVM_State state = { };
-    exec(state, (uint8_t*)input, &bytecode);
+    exec(state, input, &bytecode);
     return state.r[0].v[0];
+}
+
+vec3 eval_f3(float *input, FXVM_Bytecode bytecode)
+{
+    FXVM_State state = { };
+    exec(state, input, &bytecode);
+    auto r = state.r[0];
+    return vec3{r.v[0], r.v[1], r.v[2]};
 }
 
 void simulate(Particle_System *PS, Emitter *E, Particles *P, float dt)
 {
     emit(PS, E, P, dt);
+    float drag = PS->emitter.drag;
+
     float global_input[16];
     for (int i = 0; i < Particles::MAX; i++)
     {
         if (P->life_seconds[i] > 0.0f)
         {
-            global_input[0] = P->life_seconds[i];
+            global_input[PS->life_i] = 1.0f - P->life_seconds[i] * (1.0f / P->life_max[i]);
+            global_input[PS->velocity_i+0] = P->velocity[i].x;
+            global_input[PS->velocity_i+1] = P->velocity[i].y;
+            global_input[PS->velocity_i+2] = P->velocity[i].z;
+
             P->life_seconds[i] -= dt;
-            P->velocity[i] = P->velocity[i] + P->acceleration[i] * dt;
+            if (P->life_seconds[i] < 0.0f) P->life_seconds[i] = 0.0f;
+            P->velocity[i] = (P->velocity[i] + P->acceleration[i] * dt) * drag;
             P->position[i] = P->position[i] + P->velocity[i] * dt;
             P->size[i] = eval_f1(global_input, PS->size);
+            P->color[i] = eval_f3(global_input, PS->color);
+            //printf("P color: %.2f %.2f %.2f\n", P->color[i].x, P->color[i].y, P->color[i].z);
         }
     }
 }
 
 void draw_particle(Particles *P, int i)
 {
-    float r = (i & 1) ? 1.0f : 1.0f;
-    float g = (i & 3) ? 1.0f : 0.0f;
-    float fade = P->life_seconds[i] / P->life_max[i];
+    //float r = (i & 1) ? 1.0f : 1.0f;
+    //float g = (i & 3) ? 1.0f : 0.0f;
+    //float fade = P->life_seconds[i] / P->life_max[i];
     //float size = 0.002f + (1.0 - fade) * 0.05f;
     float size = P->size[i];
     float x = P->position[i].x;
     float y = P->position[i].y;
-    glColor4f(1.0f * fade * r, 1.0f * fade * g, 0.0f, fade);
+    //glColor4f(1.0f * fade * r, 1.0f * fade * g, 0.0f, fade);
+    glColor3f(P->color[i].x, P->color[i].y, P->color[i].z);
     glVertex3f(x - size, y, 0.0f);
     glVertex3f(x, y + size, 0.0f);
     glVertex3f(x + size, y, 0.0f);
@@ -295,12 +324,13 @@ void draw(Particles *P)
 
 void report_compile_error(const char *err) { printf("Error: %s\n", err); }
 
-FXVM_Bytecode compile(const char *source)
+FXVM_Bytecode compile(Particle_System *PS, const char *source)
 {
     FXVM_Compiler compiler = { };
     compiler.report_error = report_compile_error;
 
-    register_input_variable(&compiler, "particle_life", FXTYP_F1);
+    PS->life_i = register_input_variable(&compiler, "particle_life", FXTYP_F1);
+    PS->velocity_i = register_input_variable(&compiler, "particle_velocity", FXTYP_F3);
 
     compile(&compiler, source, source + strlen(source));
     return { compiler.codegen.buffer_len, compiler.codegen.buffer };
@@ -313,17 +343,36 @@ Particle_System load_psys()
     Particle_System result = { };
     result.emitter.rate = 20.0f;
     result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
-    result.size = compile(
+    result.emitter.drag = 0.97;
+    result.size = compile(&result,
 SOURCE(
-    0.02 * sin(particle_life * 4.0);
+    0.02 - 0.02 * particle_life;
 ));
+    result.color = compile(&result,
+SOURCE(
+    c0 = lerp(vec3(1.0, 1.0, 0.5), vec3(1.0, 0.5, 0.0), clamp01(particle_life * 2.0));
+    lerp(c0, vec3(0.5, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
+));
+    //lerp(vec3(1.0, 1.0, 0.2), vec3(1.0, 0.0, 0.0), particle_life);
+/*SOURCE(
+    r = sin(particle_life * 6.0);
+    g = cos(particle_life * 4.0);
+    clamp01(vec3(r, g, g));
+));*/
     return result;
 }
+
+#include <intrin.h>
 
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
     Window window = create_window(1000, 800);
+    BringWindowToTop((HWND)window.hwnd);
+    SetWindowPos((HWND)window.hwnd,HWND_NOTOPMOST,0,0,0,0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos((HWND)window.hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos((HWND)window.hwnd,HWND_NOTOPMOST,0,0,0,0,SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+    SetForegroundWindow((HWND)window.hwnd);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
@@ -343,16 +392,15 @@ int main(int argc, char **argv)
     QueryPerformanceCounter(&counter);
 
     float sim_dt = 0.01666f;
-
-    float sim_time = 0.0f;
+    uint64_t sim_ticks = 0;
 
     MSG msg = { };
     while (running)
     {
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE) > 0)
         {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
         }
 
         LARGE_INTEGER last_counter = counter;
@@ -363,20 +411,13 @@ int main(int argc, char **argv)
 
         if (time_accum > 0.1f) time_accum = 0.1f;
 
-        //printf("ticks %f\n", dt); fflush(stdout);
         while (time_accum >= sim_dt)
         {
-            //simulate(&E, &P, sim_dt);
-            LARGE_INTEGER start_counter;
-            QueryPerformanceFrequency(&start_counter);
-
+            uint64_t start_cycles = __rdtsc();
             simulate(&psys, &E, &P, sim_dt);
+            uint64_t end_cycles = __rdtsc();
 
-            LARGE_INTEGER end_counter;
-            QueryPerformanceFrequency(&end_counter);
-            LONGLONG ticks = end_counter.QuadPart - start_counter.QuadPart;
-            sim_time = sim_time * 0.95f + ((float)ticks / (float)freq.QuadPart) * 0.05f;
-
+            sim_ticks = end_cycles - start_cycles;
             time_accum -= sim_dt;
         }
         draw(&P);
@@ -384,7 +425,7 @@ int main(int argc, char **argv)
         float fps = 1.0f / dt;
 
         char buf[64];
-        snprintf(buf, 64, "FPS %.3f; SIM %.6f", fps, sim_time);
+        snprintf(buf, 64, "FPS %.3f; SIM %lld cycles", fps, sim_ticks);
         set_window_title(window, buf);
 
         SwapBuffers((HDC)window.hdc);
