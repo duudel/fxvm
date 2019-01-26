@@ -2105,6 +2105,8 @@ int register_input_variable(FXVM_Compiler *compiler, const char *name, FXVM_Type
 
 bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end)
 {
+    register_constant(compiler, "PI", 3.14159265f);
+
     int vec4_i = register_builtin_function(compiler, "vec4", FXTYP_F4, 4);
     set_function_parameter_type(compiler, vec4_i, 0, FXTYP_F1);
     set_function_parameter_type(compiler, vec4_i, 1, FXTYP_F1);
