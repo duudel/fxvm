@@ -655,7 +655,7 @@ Particle_System load_psys()
         normalize(vec3(random01-0.5, 1, sin(random01*3.2)-0.5));
     ));
     result.size = compile_particle_expr(&result, SOURCE(
-        0.01 + 0.01 * particle_random - 0.02 * particle_life + random01 * 0.018;
+        0.01 + 0.01 * particle_random - 0.02 * particle_life;// + random01 * 0.018;
     ));
     result.color = compile_particle_expr(&result, SOURCE(
         c0 = lerp(vec3(1.0, 1.0, 0.5), vec3(1.0, 0.5, 0.0), clamp01(particle_life * 2.0));

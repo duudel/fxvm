@@ -189,9 +189,21 @@ bool tokenize(FXVM_Compiler *compiler, const char *source, const char *source_en
             c++;
             break;
         case '/':
-            push_token(compiler, FXTOK_SLASH, c, c + 1);
-            c++;
-            break;
+            {
+                if (c + 1 < source_end && c[1] == '/')
+                {
+                    c += 2;
+                    while (c < source_end && c[0] != '\n')
+                    {
+                        c++;
+                    }
+                }
+                else
+                {
+                    push_token(compiler, FXTOK_SLASH, c, c + 1);
+                    c++;
+                }
+            } break;
         case ';':
             push_token(compiler, FXTOK_SEMICOLON, c, c + 1);
             c++;
