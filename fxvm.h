@@ -1,38 +1,4 @@
 
-/*
-struct ParticleData
-{
-    float *life_time;
-    float *particle_seed;
-    int alive_start;
-    int alive_end;
-    int max_size;
-};
-
-struct SwirlData
-{
-
-};
-
-void particle_update(ParticleData *input, void *particle_system_data)
-{
-    SwirlData *data = (SwirlData*)particle_system_data;
-    int alive_start = input->alive_start;
-    int alive_end = input->alive_end;
-    if (alive_end < alive_start) alive_end += input->max_size;
-    int max_size = input->max_size;
-    int new_alive_start = alive_start;
-    for (int i = alive_start; i < alive_end; i++)
-    {
-        int index = i & max_size;
-        if (input->life_time[index] >= 1.0f)
-        {
-            if (new_alive_start == i) new_alive_start++;
-        }
-    }
-}
-*/
-
 #include "fxreg.h"
 #include "fxop.h"
 #include <cstdio>
