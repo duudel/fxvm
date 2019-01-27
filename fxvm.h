@@ -80,7 +80,7 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
                 p += 3;
 
                 FXVM_TRACE_OP();
-                FXVM_TRACE("r%d <- [%d][%d]: ", target_reg, instance_index, input_attribute);
+                FXVM_TRACE("%d r%d <- [%d][%d]: ", width, target_reg, instance_index, input_attribute);
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;
@@ -353,7 +353,6 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;
-        //case FXOP_DOT:
         case FXOP_ABS:
             {
                 uint8_t target_reg = p[1] & 0xf;
@@ -389,6 +388,45 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
 
                 FXVM_TRACE_OP();
                 FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_DOT:
+            {
+                uint8_t width = p[0] >> 6;
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t a_reg = (p[1] >> 4) & 0xf;
+                uint8_t b_reg = p[2] & 0xf;
+                switch (width)
+                {
+                    case 1: S.r[target_reg].v[0] = reg_dot1(S.r[a_reg], S.r[b_reg]); break;
+                    case 2: S.r[target_reg].v[0] = reg_dot2(S.r[a_reg], S.r[b_reg]); break;
+                    case 3: S.r[target_reg].v[0] = reg_dot3(S.r[a_reg], S.r[b_reg]); break;
+                    case 4: S.r[target_reg].v[0] = reg_dot4(S.r[a_reg], S.r[b_reg]); break;
+                }
+                p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("%d r%d <- r%d r%d: ", width, target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_NORMALIZE:
+            {
+                uint8_t width = p[0] >> 6;
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t a_reg = (p[1] >> 4) & 0xf;
+                switch (width)
+                {
+                    case 1: S.r[target_reg] = reg_normalize1(S.r[a_reg]); break;
+                    case 2: S.r[target_reg] = reg_normalize2(S.r[a_reg]); break;
+                    case 3: S.r[target_reg] = reg_normalize3(S.r[a_reg]); break;
+                    case 4: S.r[target_reg] = reg_normalize4(S.r[a_reg]); break;
+                }
+                p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("%d r%d <- r%d: ", width, target_reg, a_reg);
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;

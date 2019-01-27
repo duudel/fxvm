@@ -28,13 +28,14 @@
     X(FXOP_ABS)\
     X(FXOP_MIN)\
     X(FXOP_MAX)\
+    X(FXOP_DOT)\
+    X(FXOP_NORMALIZE)\
     X(FXOP_CLAMP01)\
     X(FXOP_CLAMP)\
     X(FXOP_INTERP)\
     X(FXOP_INTERP_BY_SCALAR)
 
     //FXOP(FXOP_FMA)
-    //FXOP(FXOP_DOT)
 
 #define FXOP(op) op,
 enum FXVM_BytecodeOp

@@ -423,6 +423,8 @@ struct Emitter_Parameters
 
     float drag;
     FXVM_Bytecode drag_bc;
+
+    int random_i;
 };
 
 struct Particle_System
@@ -439,6 +441,21 @@ struct Particle_System
     int random_i;
 };
 
+float eval_f1(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
+{
+    FXVM_State state = { };
+    exec(state, input, attributes, instance_index, &bytecode);
+    return state.r[0].v[0];
+}
+
+vec3 eval_f3(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
+{
+    FXVM_State state = { };
+    exec(state, input, attributes, instance_index, &bytecode);
+    auto r = state.r[0];
+    return vec3{r.v[0], r.v[1], r.v[2]};
+}
+
 void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
 {
     float num = PS->emitter.rate * dt;
@@ -448,6 +465,7 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
     int num_to_emit = (int)num;
 
     //printf("num to emit %d, fractional_particles %f\n", num_to_emit, E->fractional_particles);
+    float global_input[16];
 
     int last_i = E->last_index;
     int i = last_i + 1;
@@ -457,8 +475,12 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
         int index = i % Particles::MAX;
         if (P->life_seconds[index] <= 0.0f)
         {
-            P->position[index] = vec3{0.0f, 0.0f, 0.0f};
-            P->velocity[index] = vec3{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
+            global_input[PS->emitter.random_i] = random01();
+            //P->position[index] = vec3{0.0f, 0.0f, 0.0f};
+            P->position[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_position_bc);
+            P->velocity[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_velocity_bc);
+            //fflush(stdout);exit(0);
+            //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
             P->acceleration[index] = vec3{0.0f, -1.0f, 0.0f};
 
             float initial_life = E->life + random01();
@@ -476,21 +498,6 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
         last_i = index;
     }
     E->last_index = last_i;
-}
-
-float eval_f1(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
-{
-    FXVM_State state = { };
-    exec(state, input, attributes, instance_index, &bytecode);
-    return state.r[0].v[0];
-}
-
-vec3 eval_f3(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
-{
-    FXVM_State state = { };
-    exec(state, input, attributes, instance_index, &bytecode);
-    auto r = state.r[0];
-    return vec3{r.v[0], r.v[1], r.v[2]};
 }
 
 void simulate(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
@@ -630,7 +637,7 @@ FXVM_Bytecode compile_emitter_expr(Particle_System *PS, const char *source)
     FXVM_Compiler compiler = { };
     compiler.report_error = report_compile_error;
 
-    PS->random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
+    PS->emitter.random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
 
     compile(&compiler, source, source + strlen(source));
     return { compiler.codegen.buffer_len, compiler.codegen.buffer };
@@ -644,6 +651,9 @@ Particle_System load_psys()
     result.emitter.rate = 40.0f;
     result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
     result.emitter.drag = 0.97;
+    result.emitter.initial_velocity_bc = compile_emitter_expr(&result, SOURCE(
+        normalize(vec3(random01-0.5, 1, sin(random01*3.2)-0.5));
+    ));
     result.size = compile_particle_expr(&result, SOURCE(
         0.01 + 0.01 * particle_random - 0.02 * particle_life + random01 * 0.018;
     ));

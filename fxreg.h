@@ -88,6 +88,42 @@ inline Reg reg_min(Reg a, Reg b)
 inline Reg reg_max(Reg a, Reg b)
 { return { fmaxf(a.v[0], b.v[0]), fmaxf(a.v[1], b.v[1]), fmaxf(a.v[2], b.v[2]), fmaxf(a.v[3], b.v[3]) }; }
 
+inline float reg_dot1(Reg a, Reg b)
+{ return a.v[0] * b.v[0]; }
+
+inline float reg_dot2(Reg a, Reg b)
+{ return a.v[0] * b.v[0] + a.v[1] * b.v[1]; }
+
+inline float reg_dot3(Reg a, Reg b)
+{ return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2]; }
+
+inline float reg_dot4(Reg a, Reg b)
+{ return a.v[0] * b.v[0] + a.v[1] * b.v[1] + a.v[2] * b.v[2] + a.v[3] * b.v[3]; }
+
+inline Reg reg_normalize1(Reg a)
+{ return { 1.0f, a.v[1], a.v[2], a.v[3] }; }
+
+inline Reg reg_normalize2(Reg a)
+{
+    float len2 = reg_dot2(a, a);
+    float k = 1.0f / sqrt(len2);
+    return { a.v[0] * k, a.v[1] * k, a.v[2], a.v[3] };
+}
+
+inline Reg reg_normalize3(Reg a)
+{
+    float len2 = reg_dot3(a, a);
+    float k = 1.0f / sqrt(len2);
+    return { a.v[0] * k, a.v[1] * k, a.v[2] * k, a.v[3] };
+}
+
+inline Reg reg_normalize4(Reg a)
+{
+    float len2 = reg_dot2(a, a);
+    float k = 1.0f / sqrt(len2);
+    return { a.v[0] * k, a.v[1] * k, a.v[2] * k, a.v[3] * k };
+}
+
 inline Reg reg_clamp01(Reg a)
 { return { fminf(fmaxf(a.v[0], 0.0f), 1.0f), fminf(fmaxf(a.v[1], 0.0f), 1.0f), fminf(fmaxf(a.v[2], 0.0f), 1.0f), fminf(fmaxf(a.v[3], 0.0f), 1.0f) }; }
 

@@ -1052,6 +1052,8 @@ enum FXVM_ILOp
     FXIL_ABS,
     FXIL_MIN,
     FXIL_MAX,
+    FXIL_DOT,
+    FXIL_NORMALIZE,
     FXIL_CLAMP01,
     FXIL_CLAMP,
     FXIL_INTERP,
@@ -1088,6 +1090,8 @@ FXVM_ILInstrInfo il_instr_info[] = {
     [FXIL_ABS] =         {"FXIL_ABS", 2},
     [FXIL_MIN] =         {"FXIL_MIN", 3},
     [FXIL_MAX] =         {"FXIL_MAX", 3},
+    [FXIL_DOT] =         {"FXIL_DOT", 3},
+    [FXIL_NORMALIZE] =   {"FXIL_NORMALIZE", 3},
     [FXIL_CLAMP01] =     {"FXIL_CLAMP01", 2},
     [FXIL_CLAMP] =       {"FXIL_CLAMP", 4},
     [FXIL_INTERP] =      {"FXIL_INTERP", 4},
@@ -1439,6 +1443,18 @@ FXIL_Reg emit_max(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
     return result;
 }
 
+FXIL_Reg emit_dot(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{
+    FXIL_Reg result = new_il_reg(ctx, call->type);
+    FXIL_Reg param_a = generate_expr(compiler, ctx, call->call.params.nodes[0]);
+    FXIL_Reg param_b = generate_expr(compiler, ctx, call->call.params.nodes[1]);
+    push_il(ctx, FXIL_DOT, result, param_a, param_b);
+    return result;
+}
+
+FXIL_Reg emit_normalize(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_NORMALIZE>(compiler, ctx, call); }
+
 FXIL_Reg emit_clamp01(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 { return emit_single_param_func<FXIL_CLAMP01>(compiler, ctx, call); }
 
@@ -1553,6 +1569,8 @@ FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_A
         {"abs", emit_abs},
         {"min", emit_min},
         {"max", emit_max},
+        {"dot", emit_dot},
+        {"normalize", emit_normalize},
         {"clamp01", emit_clamp01},
         {"clamp", emit_clamp},
         {"lerp", emit_lerp},
@@ -1921,6 +1939,24 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
             write_regs(gen, target_reg, source_reg1);
             write_regs(gen, source_reg2);
         } break;
+    case FXIL_DOT:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg1 = get_register(regs, instr->read_operands[0]);
+            int source_reg2 = get_register(regs, instr->read_operands[1]);
+            int width = (int)instr->read_operands[0].type; // TODO: cleanup
+            write_op(gen, FXOP_DOT, width);
+            write_regs(gen, target_reg, source_reg1);
+            write_regs(gen, source_reg2);
+        } break;
+    case FXIL_NORMALIZE:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            int width = (int)instr->read_operands[0].type; // TODO: cleanup
+            write_op(gen, FXOP_NORMALIZE, width);
+            write_regs(gen, target_reg, source_reg);
+        } break;
     case FXIL_CLAMP01:
         {
             int target_reg = allocate_register(gen, regs, instr->target);
@@ -2032,9 +2068,11 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
             case FXIL_DIV:
             case FXIL_MIN:
             case FXIL_MAX:
+            case FXIL_DOT:
                 read_from(regs, instructions[i].read_operands[0], i);
                 read_from(regs, instructions[i].read_operands[1], i);
                 break;
+            case FXIL_NORMALIZE:
             case FXIL_CLAMP01:
                 read_from(regs, instructions[i].read_operands[0], i);
                 break;
@@ -2197,6 +2235,13 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
     int max_i = register_builtin_function(compiler, "max", FXTYP_GENF, 2);
     set_function_parameter_type(compiler, max_i, 0, FXTYP_GENF);
     set_function_parameter_type(compiler, max_i, 1, FXTYP_GENF);
+
+    int dot_i = register_builtin_function(compiler, "dot", FXTYP_F1, 2);
+    set_function_parameter_type(compiler, dot_i, 0, FXTYP_GENF);
+    set_function_parameter_type(compiler, dot_i, 1, FXTYP_GENF);
+
+    int normalize_i = register_builtin_function(compiler, "normalize", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, normalize_i, 0, FXTYP_GENF);
 
     int clamp01_i = register_builtin_function(compiler, "clamp01", FXTYP_GENF, 1);
     set_function_parameter_type(compiler, clamp01_i, 0, FXTYP_GENF);
