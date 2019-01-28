@@ -17,6 +17,7 @@
     X(FXOP_MUL)\
     X(FXOP_MUL_BY_SCALAR)\
     X(FXOP_DIV)\
+    X(FXOP_DIV_BY_SCALAR)\
     X(FXOP_RCP)\
     X(FXOP_RSQRT)\
     X(FXOP_SQRT)\
@@ -25,6 +26,8 @@
     X(FXOP_EXP)\
     X(FXOP_EXP2)\
     X(FXOP_EXP10)\
+    X(FXOP_TRUNC)\
+    X(FXOP_FRACT)\
     X(FXOP_ABS)\
     X(FXOP_MIN)\
     X(FXOP_MAX)\

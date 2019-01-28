@@ -256,7 +256,19 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;
-        //case FXOP_FMA:
+        case FXOP_DIV_BY_SCALAR:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t a_reg = (p[1] >> 4) & 0xf;
+                uint8_t b_reg = p[2] & 0xf;
+                S.r[target_reg] = reg_div_by_scalar(S.r[a_reg], S.r[b_reg]);
+                p += 3;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d r%d: ", target_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
         case FXOP_RCP:
             {
                 uint8_t target_reg = p[1] & 0xf;
@@ -346,6 +358,30 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
                 uint8_t target_reg = p[1] & 0xf;
                 uint8_t source_reg = (p[1] >> 4) & 0xf;
                 S.r[target_reg] = reg_exp10(S.r[source_reg]);
+                p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_TRUNC:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t source_reg = (p[1] >> 4) & 0xf;
+                S.r[target_reg] = reg_trunc(S.r[source_reg]);
+                p += 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- r%d: ", target_reg, source_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_FRACT:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                uint8_t source_reg = (p[1] >> 4) & 0xf;
+                S.r[target_reg] = reg_fract(S.r[source_reg]);
                 p += 2;
 
                 FXVM_TRACE_OP();

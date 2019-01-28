@@ -53,6 +53,9 @@ inline Reg reg_mul_by_scalar(Reg a, Reg b)
 inline Reg reg_div(Reg a, Reg b)
 { return { a.v[0] / b.v[0], a.v[1] / b.v[1], a.v[2] / b.v[2], a.v[3] / b.v[3] }; }
 
+inline Reg reg_div_by_scalar(Reg a, Reg b)
+{ return { a.v[0] / b.v[0], a.v[1] / b.v[0], a.v[2] / b.v[0], a.v[3] / b.v[0] }; }
+
 inline Reg reg_rcp(Reg a)
 { return { 1.0f/a.v[0], 1.0f/a.v[1], 1.0f/a.v[2], 1.0f/a.v[3] }; }
 
@@ -78,6 +81,15 @@ inline float exp10f(float v) { return expf(v) / expf(10.0f); }
 
 inline Reg reg_exp10(Reg a)
 { return { exp10f(a.v[0]), exp10f(a.v[1]), exp10f(a.v[2]), exp10f(a.v[3]) }; }
+
+inline Reg reg_trunc(Reg a)
+{ return { truncf(a.v[0]), truncf(a.v[1]), truncf(a.v[2]), truncf(a.v[3]) }; }
+
+inline float fract(float x)
+{ return x - truncf(x); }
+
+inline Reg reg_fract(Reg a)
+{ return { fract(a.v[0]), fract(a.v[1]), fract(a.v[2]), fract(a.v[3]) }; }
 
 inline Reg reg_abs(Reg a)
 { return { fabsf(a.v[0]), fabsf(a.v[1]), fabsf(a.v[2]), fabsf(a.v[3]) }; }

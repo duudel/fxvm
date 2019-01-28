@@ -544,6 +544,11 @@ FXVM_Ast* parse_term(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
             binary_expr->binary.left = expr;
             binary_expr->binary.right = parse_unary_factor(compiler, tokens);
 
+            if (!binary_expr->binary.right)
+            {
+                expected_expression(compiler, tokens);
+            }
+
             expr = binary_expr;
         }
     }
@@ -573,6 +578,11 @@ FXVM_Ast* parse_addition(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
             }
             binary_expr->binary.left = expr;
             binary_expr->binary.right = parse_term(compiler, tokens);
+
+            if (!binary_expr->binary.right)
+            {
+                expected_expression(compiler, tokens);
+            }
 
             expr = binary_expr;
         }
@@ -1061,6 +1071,8 @@ enum FXVM_ILOp
     FXIL_EXP,
     FXIL_EXP2,
     FXIL_EXP10,
+    FXIL_TRUNC,
+    FXIL_FRACT,
     FXIL_ABS,
     FXIL_MIN,
     FXIL_MAX,
@@ -1099,6 +1111,8 @@ FXVM_ILInstrInfo il_instr_info[] = {
     [FXIL_EXP] =         {"FXIL_EXP", 2},
     [FXIL_EXP2] =        {"FXIL_EXP2", 2},
     [FXIL_EXP10] =       {"FXIL_EXP10", 2},
+    [FXIL_TRUNC] =       {"FXIL_TRUNC", 2},
+    [FXIL_FRACT] =       {"FXIL_FRACT", 2},
     [FXIL_ABS] =         {"FXIL_ABS", 2},
     [FXIL_MIN] =         {"FXIL_MIN", 3},
     [FXIL_MAX] =         {"FXIL_MAX", 3},
@@ -1433,6 +1447,12 @@ FXIL_Reg emit_exp2(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 
 FXIL_Reg emit_exp10(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 { return emit_single_param_func<FXIL_EXP10>(compiler, ctx, call); }
+
+FXIL_Reg emit_trunc(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_TRUNC>(compiler, ctx, call); }
+
+FXIL_Reg emit_fract(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{ return emit_single_param_func<FXIL_FRACT>(compiler, ctx, call); }
 
 FXIL_Reg emit_abs(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 { return emit_single_param_func<FXIL_ABS>(compiler, ctx, call); }
@@ -1866,9 +1886,18 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
             int target_reg = allocate_register(gen, regs, instr->target);
             int a_reg = get_register(regs, instr->read_operands[0]);
             int b_reg = get_register(regs, instr->read_operands[1]);
-            write_op(gen, FXOP_DIV);
-            write_regs(gen, target_reg, a_reg);
-            write_regs(gen, b_reg);
+            if (instr->read_operands[0].type != FXTYP_F1 && instr->read_operands[1].type == FXTYP_F1)
+            {
+                write_op(gen, FXOP_DIV_BY_SCALAR);
+                write_regs(gen, target_reg, a_reg);
+                write_regs(gen, b_reg);
+            }
+            else
+            {
+                write_op(gen, FXOP_DIV);
+                write_regs(gen, target_reg, a_reg);
+                write_regs(gen, b_reg);
+            }
         } break;
     case FXIL_RCP:
         {
@@ -1924,6 +1953,20 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
             int target_reg = allocate_register(gen, regs, instr->target);
             int source_reg = get_register(regs, instr->read_operands[0]);
             write_op(gen, FXOP_EXP10);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_TRUNC:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_TRUNC);
+            write_regs(gen, target_reg, source_reg);
+        } break;
+    case FXIL_FRACT:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->read_operands[0]);
+            write_op(gen, FXOP_FRACT);
             write_regs(gen, target_reg, source_reg);
         } break;
     case FXIL_ABS:
@@ -2071,6 +2114,8 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
             case FXIL_EXP:
             case FXIL_EXP2:
             case FXIL_EXP10:
+            case FXIL_TRUNC:
+            case FXIL_FRACT:
             case FXIL_ABS:
                 read_from(regs, instructions[i].read_operands[0], i);
                 break;
@@ -2236,6 +2281,12 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
 
     int exp10_i = register_builtin_function(compiler, "exp10", FXTYP_GENF, 1);
     set_function_parameter_type(compiler, exp10_i, 0, FXTYP_GENF);
+
+    int trunc_i = register_builtin_function(compiler, "trunc", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, trunc_i, 0, FXTYP_GENF);
+
+    int fract_i = register_builtin_function(compiler, "fract", FXTYP_GENF, 1);
+    set_function_parameter_type(compiler, fract_i, 0, FXTYP_GENF);
 
     int abs_i = register_builtin_function(compiler, "abs", FXTYP_GENF, 1);
     set_function_parameter_type(compiler, abs_i, 0, FXTYP_GENF);
