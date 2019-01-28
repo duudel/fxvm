@@ -214,6 +214,11 @@ float random01()
     return (float)rand() / RAND_MAX;
 }
 
+float clamp01(float x)
+{
+    return (x > 1.0f) ? 1.0f : ((x < 0.0f) ? 0.0f : x);
+}
+
 
 struct vec3
 {
@@ -384,7 +389,6 @@ vec4 transform(mat4 tr, vec4 p)
 
 struct Emitter_Instance
 {
-    float rate;
     float fractional_particles;
     float life;
 
@@ -409,8 +413,13 @@ struct Particles
 
 struct Emitter_Parameters
 {
+    float life_max;
+    bool loop;
+
     float rate;
     FXVM_Bytecode rate_bc;
+
+    vec3 acceleration;
 
     float initial_life;
     FXVM_Bytecode initial_life_bc;
@@ -424,6 +433,7 @@ struct Emitter_Parameters
     float drag;
     FXVM_Bytecode drag_bc;
 
+    int life_i;
     int random_i;
 };
 
@@ -433,13 +443,30 @@ struct Particle_System
 
     FXVM_Bytecode color;
     FXVM_Bytecode size;
+    FXVM_Bytecode acceleration;
 
     int attrib_life;
+    int attrib_position;
     int attrib_velocity;
+    int attrib_acceleration;
     int attrib_particle_random;
 
     int random_i;
+    int emitter_life_i;
 };
+
+Emitter_Instance new_emitter(Particle_System *PS)
+{
+    Emitter_Instance result = { };
+    result.life = PS->emitter.life_max;
+    return result;
+}
+
+float get_emitter_life(Emitter_Parameters *EP, Emitter_Instance *E)
+{
+    float life10 = E->life / EP->life_max;
+    return clamp01(1.0f - life10);
+}
 
 float eval_f1(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
 {
@@ -466,6 +493,12 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
 
     //printf("num to emit %d, fractional_particles %f\n", num_to_emit, E->fractional_particles);
     float global_input[16];
+    global_input[PS->emitter.life_i] = get_emitter_life(&PS->emitter, E);
+    E->life -= dt;
+    if (E->life <= 0.0f)
+    {
+        if (PS->emitter.loop) E->life = PS->emitter.life_max;
+    }
 
     int last_i = E->last_index;
     int i = last_i + 1;
@@ -481,9 +514,9 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
             P->velocity[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_velocity_bc);
             //fflush(stdout);exit(0);
             //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
-            P->acceleration[index] = vec3{0.0f, -1.0f, 0.0f};
+            P->acceleration[index] = PS->emitter.acceleration;//vec3{0.0f, -1.0f, 0.0f};
 
-            float initial_life = E->life + random01();
+            float initial_life = PS->emitter.initial_life + random01();
             P->life_seconds[index] = initial_life;
             P->life_max[index] = initial_life;
             P->life_01[index] = 0.0f;
@@ -503,15 +536,22 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
 void simulate(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
 {
     E->particles_alive = 0;
-    emit(PS, E, P, dt);
-    float drag = PS->emitter.drag;
+    if (E->life > 0.0f)
+    {
+        emit(PS, E, P, dt);
+    }
 
     float global_input[16];
     float *attributes[16];
     attributes[PS->attrib_life] = P->life_01;
+    attributes[PS->attrib_position] = (float*)&P->position;
     attributes[PS->attrib_velocity] = (float*)&P->velocity;
+    attributes[PS->attrib_acceleration] = (float*)&P->acceleration;
     attributes[PS->attrib_particle_random] = (float*)&P->random;
 
+    global_input[PS->emitter_life_i] = get_emitter_life(&PS->emitter, E);
+
+    float drag = PS->emitter.drag;
     for (int i = 0; i < Particles::MAX; i++)
     {
         if (P->life_seconds[i] > 0.0f)
@@ -521,6 +561,11 @@ void simulate(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
             P->life_seconds[i] -= dt;
             if (P->life_seconds[i] < 0.0f) P->life_seconds[i] = 0.0f;
             P->life_01[i] = 1.0f - P->life_seconds[i] * (1.0f / P->life_max[i]);
+
+            if (PS->acceleration.code)
+            {
+                P->acceleration[i] = eval_f3(global_input, attributes, i, PS->acceleration);
+            }
 
             P->velocity[i] = (P->velocity[i] + P->acceleration[i] * dt) * drag;
             P->position[i] = P->position[i] + P->velocity[i] * dt;
@@ -546,21 +591,128 @@ void move_camera(Camera *camera, int delta_x, int delta_y)
     camera->rotation.x += (float)delta_y * 0.02f;
 }
 
-void draw_particle(Particles *P, int i, vec3 right, vec3 up)
+mat4 camera_matrix(Camera camera)
+{
+    return
+        translation(vec3{0, -2.0, -1.0f * camera.zoom}) *
+        rotation_x(-camera.rotation.x-0.5) *
+        rotation_y(-camera.rotation.y)
+        ;
+}
+
+#include "fxcomp.h"
+
+void report_compile_error(const char *err) { printf("Error: %s\n", err); }
+
+FXVM_Bytecode compile_particle_expr(Particle_System *PS, const char *source)
+{
+    FXVM_Compiler compiler = { };
+    compiler.report_error = report_compile_error;
+
+    PS->random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
+    PS->emitter_life_i = register_global_input_variable(&compiler, "emitter_life", FXTYP_F1);
+
+    PS->attrib_life = register_attribute(&compiler, "particle_life", FXTYP_F1);
+    PS->attrib_position = register_attribute(&compiler, "particle_position", FXTYP_F3);
+    PS->attrib_velocity = register_attribute(&compiler, "particle_velocity", FXTYP_F3);
+    PS->attrib_acceleration = register_attribute(&compiler, "particle_acceleration", FXTYP_F3);
+    PS->attrib_particle_random = register_attribute(&compiler, "particle_random", FXTYP_F1);
+
+    compile(&compiler, source, source + strlen(source));
+    return { compiler.codegen.buffer_len, compiler.codegen.buffer };
+}
+
+FXVM_Bytecode compile_emitter_expr(Particle_System *PS, const char *source)
+{
+    FXVM_Compiler compiler = { };
+    compiler.report_error = report_compile_error;
+
+    PS->emitter.life_i = register_global_input_variable(&compiler, "emitter_life", FXTYP_F1);
+    PS->emitter.random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
+
+    compile(&compiler, source, source + strlen(source));
+    return { compiler.codegen.buffer_len, compiler.codegen.buffer };
+}
+
+#define SOURCE(x) #x
+
+Particle_System load_psys()
+{
+    Particle_System result = { };
+    result.emitter.life_max = 8.0f;
+    result.emitter.loop = true;
+    result.emitter.rate = 400.0f;
+    result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
+    result.emitter.drag = 0.95;
+    result.emitter.initial_position_bc = compile_emitter_expr(&result, SOURCE(
+        theta = random01 * 2.0 * PI * emitter_life * 5.0;
+        r = random01 * 1.1415; // * emitter_life;
+        sr = sqrt(r);
+        vec3(sr * cos(theta), 0.0, sr * sin(theta));
+    ));
+    result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
+    result.emitter.initial_velocity_bc = compile_emitter_expr(&result, SOURCE(
+        vec3(random01-0.5, 8, sin(random01*3.2)-0.5) * 0.25;
+    ));
+
+    result.acceleration = compile_particle_expr(&result, SOURCE(
+        target = vec3(0, 5 * emitter_life, 0);
+        v = target - particle_position;
+        v * 10.0 * emitter_life + vec3(random01 * 2.0 - 1.0, random01 * 2.0 - 1.0, random01 * 2.0 - 1.0) * 10.0 * emitter_life;
+    ));
+    result.size = compile_particle_expr(&result, SOURCE(
+        emitter_life * 0.08 + 0.08 + 0.02 * particle_random - 0.04 * particle_life;// + random01 * 0.018;
+    ));
+    result.color = compile_particle_expr(&result, SOURCE(
+        c0 = lerp(vec3(1.0, 1.0, 0.5), vec3(1.0, 0.5, 0.0), clamp01(particle_life * 2.0));
+        lerp(c0, vec3(0.5, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
+    ));
+    return result;
+}
+
+vec3 lerp(vec3 a, vec3 b, float t)
+{
+    return a * (1.0f - t) + b * t;
+}
+
+void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look)
 {
     float size = P->size[i] * 0.5f;
 
-    vec3 w_pos = vec3{P->position[i].x, P->position[i].y, P->position[i].z};
+    vec3 w_pos = P->position[i];
+    vec3 w_vel = P->velocity[i];
 
-    //vec3 h0 = vec3{1.0f, 0.0f, 0.0f} * size;
-    //vec3 h1 = vec3{0.0f, 1.0f, 0.0f} * size;
+    vec3 e3 = look;
+    vec3 v = normalize(w_vel);
+    vec3 hh0 = w_vel; //normalize(w_vel - e3 * dot(w_vel, e3));
+    vec3 hh1 = normalize(cross(v, e3));
 
-    vec3 h0 = right * size;
-    vec3 h1 = up * size;
+    vec3 h0 = hh0 * size;
+    vec3 h1 = hh1 * size;
+
+    float k = dot(look, v) * 0.9f;
+    k *= k;
+    k *= k;
+
+    h0 = lerp(h0, right * size, k);
+    h1 = lerp(h1, up * size, k);
+
+    //vec3 h0 = right * size;
+    //vec3 h1 = up * size;
+
+    //vec3 w_pos0 = w_pos - w_vel - h0 - h1;
+    //vec3 w_pos1 = w_pos - w_vel - h0 + h1;
+    //vec3 w_pos2 = w_pos + w_vel + h0 + h1;
+    //vec3 w_pos3 = w_pos + w_vel + h0 - h1;
+
+    //vec3 w_pos0 = w_pos - h0 - h1;
+    //vec3 w_pos1 = w_pos - h0 + h1;
+    //vec3 w_pos2 = w_pos + h0 + h1;
+    //vec3 w_pos3 = w_pos + h0 - h1;
 
     vec3 w_pos0 = w_pos - h0 - h1;
-    vec3 w_pos1 = w_pos - h0 + h1;
-    vec3 w_pos2 = w_pos + h0 + h1;
+    vec3 w_pos1 = w_pos - h0;
+    vec3 w_pos2 = w_pos + h0;
     vec3 w_pos3 = w_pos + h0 - h1;
 
     glColor3f(P->color[i].x, P->color[i].y, P->color[i].z);
@@ -570,15 +722,6 @@ void draw_particle(Particles *P, int i, vec3 right, vec3 up)
     glVertex3fv(&w_pos0.x);
     glVertex3fv(&w_pos2.x);
     glVertex3fv(&w_pos3.x);
-}
-
-mat4 camera_matrix(Camera camera)
-{
-    return
-        translation(vec3{0, 0.0, -1.0f * camera.zoom}) *
-        rotation_x(camera.rotation.x) *
-        rotation_y(camera.rotation.y)
-        ;
 }
 
 void draw(Camera camera, int width, int height, Particles *P)
@@ -593,13 +736,14 @@ void draw(Camera camera, int width, int height, Particles *P)
     mat4 view_mat = camera_matrix(camera);
     vec3 right = {view_mat[0], view_mat[1], view_mat[2]};
     vec3 up = {view_mat[4], view_mat[5], view_mat[6]};
+    vec3 look = {view_mat[8], view_mat[9], view_mat[10]};
+    //vec3 cam_pos = {view_mat[3], view_mat[7], view_mat[11]};
     view_mat = transpose(view_mat);
     glMatrixMode(GL_MODELVIEW);
     glLoadMatrixf(view_mat.m);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE);
-    //glBlendEquationEXT();
 
     glClear(GL_COLOR_BUFFER_BIT);
     glBegin(GL_TRIANGLES);
@@ -607,70 +751,30 @@ void draw(Camera camera, int width, int height, Particles *P)
     {
         if (P->life_seconds[i] > 0.0f)
         {
-            draw_particle(P, i, right, up);
+            draw_particle(P, i, right, up, look);
         }
     }
     glEnd();
+
+    glBegin(GL_LINES);
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(1.0f, 0.0f, 0.0f);
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 1.0f, 0.0f);
+    glColor3f(0.0f, 0.0f, 1.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 1.0f);
+    glEnd();
 }
-
-#include "fxcomp.h"
-
-void report_compile_error(const char *err) { printf("Error: %s\n", err); }
-
-FXVM_Bytecode compile_particle_expr(Particle_System *PS, const char *source)
-{
-    FXVM_Compiler compiler = { };
-    compiler.report_error = report_compile_error;
-
-    PS->random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
-
-    PS->attrib_life = register_attribute(&compiler, "particle_life", FXTYP_F1);
-    PS->attrib_velocity = register_attribute(&compiler, "particle_velocity", FXTYP_F3);
-    PS->attrib_particle_random = register_attribute(&compiler, "particle_random", FXTYP_F1);
-
-    compile(&compiler, source, source + strlen(source));
-    return { compiler.codegen.buffer_len, compiler.codegen.buffer };
-}
-
-FXVM_Bytecode compile_emitter_expr(Particle_System *PS, const char *source)
-{
-    FXVM_Compiler compiler = { };
-    compiler.report_error = report_compile_error;
-
-    PS->emitter.random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
-
-    compile(&compiler, source, source + strlen(source));
-    return { compiler.codegen.buffer_len, compiler.codegen.buffer };
-}
-
-#define SOURCE(x) #x
-
-Particle_System load_psys()
-{
-    Particle_System result = { };
-    result.emitter.rate = 40.0f;
-    result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
-    result.emitter.drag = 0.97;
-    result.emitter.initial_velocity_bc = compile_emitter_expr(&result, SOURCE(
-        normalize(vec3(random01-0.5, 1, sin(random01*3.2)-0.5));
-    ));
-    result.size = compile_particle_expr(&result, SOURCE(
-        0.01 + 0.01 * particle_random - 0.02 * particle_life;// + random01 * 0.018;
-    ));
-    result.color = compile_particle_expr(&result, SOURCE(
-        c0 = lerp(vec3(1.0, 1.0, 0.5), vec3(1.0, 0.5, 0.0), clamp01(particle_life * 2.0));
-        lerp(c0, vec3(0.5, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
-    ));
-    return result;
-}
-
-#include <intrin.h>
 
 void mouse_wheel(float wheel, Camera *camera)
 {
-    printf("wheel %f\n", wheel); fflush(stdout);
     camera->zoom += wheel * 0.05f;
 }
+
+#include <intrin.h> // for rtdsc
 
 int main(int argc, char **argv)
 {
@@ -681,15 +785,12 @@ int main(int argc, char **argv)
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     Particles P = { };
-    Emitter_Instance E = { };
-    E.rate = 30.0f;
-    E.life = 1.0f;
 
     Particle_System psys = load_psys();
-    //Emitter_Instance E = new_emitter(psys);
+    Emitter_Instance E = new_emitter(&psys);
 
     Camera camera = { };
-    camera.zoom = 1.0f;
+    camera.zoom = 5.0f;
 
     window.wheel_user_ptr = &camera;
     window.mouse_wheel = (void (*)(float, void*))mouse_wheel;
