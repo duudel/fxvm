@@ -47,12 +47,18 @@ enum FXVM_BytecodeOp
 };
 #undef FXOP
 
+
+#if defined(FXVM_IMPL) || defined(FXVM_COMPILER_IMPL)
+
 #define FXOP(op) #op,
 const char* fxvm_opcode_string[] =
 {
     FXOPS(FXOP)
 };
 #undef FXOP
+
+#endif
+
 
 #undef FXOPS
 

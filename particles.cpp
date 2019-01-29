@@ -149,64 +149,9 @@ void set_window_title(Window w, const char *title)
 }
 
 
-/*
-void emit(Emitter *E, Particles *P, float dt)
-{
-    float num = E->rate * dt;
-    float to_emit = num + E->fractional_particles;
-    num = trunc(to_emit);
-    E->fractional_particles = to_emit - num;
-    int num_to_emit = (int)num;
-
-    //printf("num to emit %d, fractional_particles %f\n", num_to_emit, E->fractional_particles);
-
-    int last_i = E->last_index;
-    int i = last_i + 1;
-    int search = 0;
-    while (search < Particles::MAX && num_to_emit > 0)
-    {
-        int index = i % Particles::MAX;
-        if (P->life_seconds[index] <= 0.0f)
-        {
-            P->position[index] = vec3{0.0f, 0.0f, 0.0f};
-            P->velocity[index] = vec3{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
-            P->acceleration[index] = vec3{0.0f, -1.0f, 0.0f};
-
-            float initial_life = E->life + random01();
-            P->life_seconds[index] = initial_life;
-            P->life_max[index] = initial_life;
-            P->size[index] = 0.01f;
-            P->color[index] = vec3{1.0f, 1.0f, 1.0f};
-            P->random[index] = vec4{random01(), random01(), random01(), random01()};
-
-            num_to_emit--;
-        }
-        i++;
-        search++;
-        last_i = index;
-    }
-    E->last_index = last_i;
-}
-
-void simulate(Emitter *E, Particles *P, float dt)
-{
-    E->particles_alive = 0;
-    emit(E, P, dt);
-    for (int i = 0; i < Particles::MAX; i++)
-    {
-        if (P->life_seconds[i] > 0.0f)
-        {
-            P->life_seconds[i] -= dt;
-            P->velocity[i] = P->velocity[i] + P->acceleration[i] * dt;
-            P->position[i] = P->position[i] + P->velocity[i] * dt;
-
-            E->particles_alive++;
-        }
-    }
-}
-*/
-
 #include <cmath>
+
+#define FXVM_IMPL
 #include "fxvm.h"
 
 float random01()
@@ -612,6 +557,7 @@ mat4 camera_matrix(Camera camera)
         ;
 }
 
+#define FXVM_COMPILER_IMPL
 #include "fxcomp.h"
 
 void report_compile_error(const char *err) { printf("Error: %s\n", err); }

@@ -1,10 +1,7 @@
-#ifndef FXVM_COMP
+#ifndef FXVM_COMPILER
 
 #include "fxsyms.h"
 #include "fxop.h"
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
 #include <cstdint>
 
 enum FXVM_TokenKind
@@ -62,6 +59,21 @@ struct FXVM_Compiler
     int error_num;
     void (*report_error)(const char *);
 };
+
+void register_constant(FXVM_Compiler *compiler, const char *name, float *value, int width);
+void register_constant(FXVM_Compiler *compiler, const char *name, float value);
+//int register_builtin_function(FXVM_Compiler *compiler, const char *name, FXVM_Type return_type, int parameter_num);
+void set_function_parameter_type(FXVM_Compiler *compiler, int sym_index, int param_index, FXVM_Type param_type);
+int register_global_input_variable(FXVM_Compiler *compiler, const char *name, FXVM_Type type);
+int register_attribute(FXVM_Compiler *compiler, const char *name, FXVM_Type type);
+
+bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end);
+
+#ifdef FXVM_COMPILER_IMPL
+
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
 
 void invalid_char(FXVM_Compiler *compiler, const char *c)
 {
@@ -2329,6 +2341,8 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
         write_bytecode(compiler);
     return result;
 }
-
-#define FXVM_COMP
 #endif
+
+#define FXVM_COMPILER
+#endif
+

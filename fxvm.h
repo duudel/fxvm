@@ -1,7 +1,7 @@
+#ifndef FXVM_VM
 
 #include "fxreg.h"
 #include "fxop.h"
-#include <cstdio>
 
 /*
  * b1   | b2
@@ -16,7 +16,7 @@
 struct FXVM_Bytecode
 {
     int len;
-    uint8_t *code;
+    void *code;
 };
 
 struct FXVM_State
@@ -25,7 +25,11 @@ struct FXVM_State
     Reg r[MAX_REGS];
 };
 
-//#define TRACE_FXVM
+void exec(FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode);
+
+#ifdef FXVM_IMPL
+
+#include <cstdio>
 
 #ifdef TRACE_FXVM
 #define FXVM_TRACE_OP() printf("%-18s ", fxvm_opcode_string[opcode] + 5)
@@ -39,8 +43,8 @@ struct FXVM_State
 
 void exec(FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode)
 {
-    const uint8_t *end = bytecode->code + bytecode->len;
-    const uint8_t *p = bytecode->code;
+    const uint8_t *end = (uint8_t*)bytecode->code + bytecode->len;
+    const uint8_t *p = (uint8_t*)bytecode->code;
     while (p < end)
     {
         // ww opopop
@@ -521,9 +525,14 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
                 FXVM_TRACE("\n");
             } break;
         default:
-            printf("ICE: invalid opcode %d\n", opcode);fflush(stdout);
+            printf("ERROR: invalid opcode %d\n", opcode); fflush(stdout);
             return;
         }
     }
 }
+
+#endif
+
+#define FXVM_VM
+#endif
 

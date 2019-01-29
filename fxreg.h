@@ -1,12 +1,14 @@
 #ifndef FXVM_REG
 
-#include <cstdint>
-#include <cmath>
-
 struct Reg
 {
     float v[4];
 };
+
+#ifdef FXVM_IMPL
+
+#include <cstdint>
+#include <cmath>
 
 inline Reg reg_load(const uint8_t *p)
 {
@@ -149,6 +151,8 @@ inline Reg reg_interp(Reg a, Reg b, Reg t)
 
 inline Reg reg_interp_by_scalar(Reg a, Reg b, Reg t)
 { return { interp(a.v[0], b.v[0], t.v[0]), interp(a.v[1], b.v[1], t.v[0]), interp(a.v[2], b.v[2], t.v[0]), interp(a.v[3], b.v[3], t.v[0]) }; }
+
+#endif
 
 #define FXVM_REG
 #endif
