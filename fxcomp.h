@@ -1598,6 +1598,8 @@ FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_A
         {"exp", emit_exp},
         {"exp2", emit_exp2},
         {"exp10", emit_exp10},
+        {"trunc", emit_trunc},
+        {"fract", emit_fract},
         {"abs", emit_abs},
         {"min", emit_min},
         {"max", emit_max},

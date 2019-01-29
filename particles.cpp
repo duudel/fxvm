@@ -230,6 +230,7 @@ struct vec4
     float x, y, z, w;
 };
 
+vec3 operator - (vec3 a) { return {-a.x, -a.y, -a.z}; }
 vec3 operator + (vec3 a, vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 vec3 operator - (vec3 a, vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 vec3 operator * (vec3 a, vec3 b) { return {a.x * b.x, a.y * b.y, a.z * b.z}; }
@@ -254,6 +255,7 @@ vec3 normalize(vec3 a)
     return a / L;
 }
 
+vec4 operator - (vec4 a) { return {-a.x, -a.y, -a.z, -a.w}; }
 vec4 operator + (vec4 a, vec4 b) { return {a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w}; }
 vec4 operator - (vec4 a, vec4 b) { return {a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w}; }
 vec4 operator * (vec4 a, vec4 b) { return {a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w}; }
@@ -391,6 +393,7 @@ struct Emitter_Instance
 {
     float fractional_particles;
     float life;
+    vec3 position;
 
     int last_index;
 
@@ -440,6 +443,7 @@ struct Emitter_Parameters
 struct Particle_System
 {
     Emitter_Parameters emitter;
+    bool stretch;
 
     FXVM_Bytecode color;
     FXVM_Bytecode size;
@@ -455,10 +459,11 @@ struct Particle_System
     int emitter_life_i;
 };
 
-Emitter_Instance new_emitter(Particle_System *PS)
+Emitter_Instance new_emitter(Particle_System *PS, vec3 position)
 {
     Emitter_Instance result = { };
     result.life = PS->emitter.life_max;
+    result.position = position;
     return result;
 }
 
@@ -510,7 +515,7 @@ void emit(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
         {
             global_input[PS->emitter.random_i] = random01();
             //P->position[index] = vec3{0.0f, 0.0f, 0.0f};
-            P->position[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_position_bc);
+            P->position[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_position_bc) + E->position;
             P->velocity[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_velocity_bc);
             //fflush(stdout);exit(0);
             //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
@@ -567,7 +572,14 @@ void simulate(Particle_System *PS, Emitter_Instance *E, Particles *P, float dt)
                 P->acceleration[i] = eval_f3(global_input, attributes, i, PS->acceleration);
             }
 
-            P->velocity[i] = (P->velocity[i] + P->acceleration[i] * dt) * drag;
+            vec3 vel = P->velocity[i];
+            float v2 = -dot(vel, vel);
+            vec3 Fd = normalize(vel) * v2 * drag;   // drag force
+            vec3 ad = Fd;                           // drag acceleration F = ma => a = F/m; m = 1.0f => ad = Fd
+            P->acceleration[i] = P->acceleration[i] + ad;
+
+            //P->velocity[i] = (P->velocity[i] + P->acceleration[i] * dt) * drag;
+            P->velocity[i] = P->velocity[i] + P->acceleration[i] * dt;
             P->position[i] = P->position[i] + P->velocity[i] * dt;
             P->size[i] = eval_f1(global_input, attributes, i, PS->size);
             P->color[i] = eval_f3(global_input, attributes, i, PS->color);
@@ -639,6 +651,7 @@ FXVM_Bytecode compile_emitter_expr(Particle_System *PS, const char *source)
 Particle_System load_psys()
 {
     Particle_System result = { };
+    result.stretch = true;
     result.emitter.life_max = 8.0f;
     result.emitter.loop = true;
     result.emitter.rate = 400.0f;
@@ -670,50 +683,90 @@ Particle_System load_psys()
     return result;
 }
 
+Particle_System create_psys2()
+{
+    Particle_System result = { };
+    result.stretch = true;
+    result.emitter.life_max = 8.0f;
+    result.emitter.loop = true;
+    result.emitter.rate = 400.0f;
+    result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
+    result.emitter.drag = 0.95;
+    result.emitter.initial_position_bc = compile_emitter_expr(&result, SOURCE(
+        theta = random01 * 2.0 * PI;
+        r = fract(random01 * 12771.2359);
+        sr = sqrt(r) * 2.0;
+        vec3(sr * cos(theta), 0.0, sr * sin(theta));
+    ));
+    result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
+    result.emitter.initial_velocity_bc = compile_emitter_expr(&result, SOURCE(
+        vec3(random01-0.5, 8, sin(random01*3.2)-0.5) * 0.25;
+    ));
+
+    /*result.acceleration = compile_particle_expr(&result, SOURCE(
+        target = vec3(0, 5 * emitter_life, 0);
+        v = target - particle_position;
+        v * 10.0 * emitter_life + vec3(random01 * 2.0 - 1.0, random01 * 2.0 - 1.0, random01 * 2.0 - 1.0) * 10.0 * emitter_life;
+    ));*/
+    result.size = compile_particle_expr(&result, SOURCE(
+        emitter_life * 0.08 + 0.08 + 0.02 * particle_random - 0.04 * particle_life;// + random01 * 0.018;
+    ));
+    result.color = compile_particle_expr(&result, SOURCE(
+        //lerp(, clamp01(position.y));
+        vec3(0.2, 1, 0.2);
+    ));
+    return result;
+}
+
 vec3 lerp(vec3 a, vec3 b, float t)
 {
     return a * (1.0f - t) + b * t;
 }
 
-void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look)
+void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look, bool stretch)
 {
     float size = P->size[i] * 0.5f;
 
     vec3 w_pos = P->position[i];
     vec3 w_vel = P->velocity[i];
 
-    vec3 e3 = look;
-    vec3 v = normalize(w_vel);
-    vec3 hh0 = w_vel; //normalize(w_vel - e3 * dot(w_vel, e3));
-    vec3 hh1 = normalize(cross(v, e3));
+    vec3 w_pos0;
+    vec3 w_pos1;
+    vec3 w_pos2;
+    vec3 w_pos3;
 
-    vec3 h0 = hh0 * size;
-    vec3 h1 = hh1 * size;
+    if (stretch)
+    {
+        vec3 e3 = look;
+        vec3 v = normalize(w_vel);
+        vec3 hh0 = w_vel; //normalize(w_vel - e3 * dot(w_vel, e3));
+        vec3 hh1 = normalize(cross(v, e3));
 
-    float k = dot(look, v) * 0.9f;
-    k *= k;
-    k *= k;
+        vec3 h0 = hh0 * size;
+        vec3 h1 = hh1 * size;
 
-    h0 = lerp(h0, right * size, k);
-    h1 = lerp(h1, up * size, k);
+        float k = dot(look, v) * 0.9f;
+        k *= k;
+        k *= k;
 
-    //vec3 h0 = right * size;
-    //vec3 h1 = up * size;
+        h0 = lerp(h0, right * size, k);
+        h1 = lerp(h1, up * size, k);
 
-    //vec3 w_pos0 = w_pos - w_vel - h0 - h1;
-    //vec3 w_pos1 = w_pos - w_vel - h0 + h1;
-    //vec3 w_pos2 = w_pos + w_vel + h0 + h1;
-    //vec3 w_pos3 = w_pos + w_vel + h0 - h1;
+        w_pos0 = w_pos - h0 - h1;
+        w_pos1 = w_pos - h0;
+        w_pos2 = w_pos + h0;
+        w_pos3 = w_pos + h0 - h1;
+    }
+    else
+    {
+        vec3 h0 = right * size;
+        vec3 h1 = up * size;
 
-    //vec3 w_pos0 = w_pos - h0 - h1;
-    //vec3 w_pos1 = w_pos - h0 + h1;
-    //vec3 w_pos2 = w_pos + h0 + h1;
-    //vec3 w_pos3 = w_pos + h0 - h1;
-
-    vec3 w_pos0 = w_pos - h0 - h1;
-    vec3 w_pos1 = w_pos - h0;
-    vec3 w_pos2 = w_pos + h0;
-    vec3 w_pos3 = w_pos + h0 - h1;
+        w_pos0 = w_pos - h0 - h1;
+        w_pos1 = w_pos - h0 + h1;
+        w_pos2 = w_pos + h0 + h1;
+        w_pos3 = w_pos + h0 - h1;
+    }
 
     glColor3f(P->color[i].x, P->color[i].y, P->color[i].z);
     glVertex3fv(&w_pos0.x);
@@ -724,7 +777,7 @@ void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look)
     glVertex3fv(&w_pos3.x);
 }
 
-void draw(Camera camera, int width, int height, Particles *P)
+void draw(Camera camera, int width, int height, Particle_System *PS, Particles *P)
 {
     mat4 camera_proj = Perspective_lh(90.0f, (float)width / (float)height, 0.1f, 1000.0f);
     camera_proj = transpose(camera_proj);
@@ -745,13 +798,12 @@ void draw(Camera camera, int width, int height, Particles *P)
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE);
 
-    glClear(GL_COLOR_BUFFER_BIT);
     glBegin(GL_TRIANGLES);
     for (int i = 0; i < Particles::MAX; i++)
     {
         if (P->life_seconds[i] > 0.0f)
         {
-            draw_particle(P, i, right, up, look);
+            draw_particle(P, i, right, up, look, PS->stretch);
         }
     }
     glEnd();
@@ -784,10 +836,14 @@ int main(int argc, char **argv)
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-    Particles P = { };
+    Particles P1 = { };
+    Particles P2 = { };
 
-    Particle_System psys = load_psys();
-    Emitter_Instance E = new_emitter(&psys);
+    Particle_System PS1 = load_psys();
+    Emitter_Instance E1 = new_emitter(&PS1, vec3{0, 0, 0});
+
+    Particle_System PS2 = create_psys2();
+    Emitter_Instance E2 = new_emitter(&PS2, vec3{2, 0, 0});
 
     Camera camera = { };
     camera.zoom = 5.0f;
@@ -836,21 +892,24 @@ int main(int argc, char **argv)
         while (time_accum >= sim_dt)
         {
             uint64_t start_cycles = __rdtsc();
-            simulate(&psys, &E, &P, sim_dt);
+            simulate(&PS1, &E1, &P1, sim_dt * 0.25f);
+            simulate(&PS2, &E2, &P2, sim_dt * 0.25f);
             //simulate(&E, &P, sim_dt);
             uint64_t end_cycles = __rdtsc();
 
             sim_ticks = end_cycles - start_cycles;
-            sim_ticks_smooth = sim_ticks_smooth * 0.98f + sim_ticks * 0.02f;
+            sim_ticks_smooth = sim_ticks_smooth * 0.99f + sim_ticks * 0.01f;
             time_accum -= sim_dt;
         }
-        draw(camera, window.width, window.height, &P);
+        glClear(GL_COLOR_BUFFER_BIT);
+        draw(camera, window.width, window.height, &PS1, &P1);
+        draw(camera, window.width, window.height, &PS2, &P2);
 
         float fps = 1.0f / dt;
 
         char buf[64];
         snprintf(buf, 64, "FPS %.3f; SIM %lld cycles (%.0f), particles alive %d",
-                fps, sim_ticks, sim_ticks_smooth, E.particles_alive);
+                fps, sim_ticks, sim_ticks_smooth, E1.particles_alive + E2.particles_alive);
         set_window_title(window, buf);
 
         SwapBuffers((HDC)window.hdc);
