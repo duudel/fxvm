@@ -19,16 +19,34 @@ struct FXVM_Bytecode
     void *code;
 };
 
+struct FXVM_Machine
+{
+    pcg32_random_t rng;
+};
+
+FXVM_Machine fxvm_new();
+
 struct FXVM_State
 {
     enum { MAX_REGS = 16 };
     Reg r[MAX_REGS];
 };
 
-void exec(FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode);
+void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode);
+
+template <int MAX_GROUP>
+void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attributes, int instance_index, int instance_count, FXVM_Bytecode *bytecode);
+
 void disassemble(FXVM_Bytecode *bytecode);
 
 #ifdef FXVM_IMPL
+
+FXVM_Machine fxvm_new()
+{
+    FXVM_Machine result = { };
+    result.rng = PCG32_INITIALIZER;
+    return result;
+}
 
 #include <cstdio>
 
@@ -42,7 +60,7 @@ void disassemble(FXVM_Bytecode *bytecode);
 #define FXVM_TRACE_REG(i)
 #endif
 
-void exec(FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode)
+void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode)
 {
     const uint8_t *end = (uint8_t*)bytecode->code + bytecode->len;
     const uint8_t *p = (uint8_t*)bytecode->code;
@@ -526,6 +544,17 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;
+        case FXOP_RAND01:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                S.r[target_reg] = reg_random01(&vm->rng);
+                p += 16 + 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- ", target_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
         default:
             printf("ERROR: invalid opcode %d\n", opcode); fflush(stdout);
             return;
@@ -534,7 +563,7 @@ void exec(FXVM_State &S, float *global_input, float **instance_attributes, int i
 }
 
 template <int MAX_GROUP>
-void exec(FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attributes, int instance_index, int instance_count, FXVM_Bytecode *bytecode)
+void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attributes, int instance_index, int instance_count, FXVM_Bytecode *bytecode)
 {
     const uint8_t *end = (uint8_t*)bytecode->code + bytecode->len;
     const uint8_t *p = (uint8_t*)bytecode->code;
@@ -1123,6 +1152,20 @@ void exec(FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attr
 
                 FXVM_TRACE_OP();
                 FXVM_TRACE("r%d <- r%d r%d r%d: ", target_reg, t_reg, a_reg, b_reg);
+                FXVM_TRACE_REG(target_reg);
+                FXVM_TRACE("\n");
+            } break;
+        case FXOP_RAND01:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                for (int i = 0; i < instance_count; i++)
+                {
+                    S[i].r[target_reg] = reg_random01(&vm->rng);
+                }
+                p += 16 + 2;
+
+                FXVM_TRACE_OP();
+                FXVM_TRACE("r%d <- ", target_reg);
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;

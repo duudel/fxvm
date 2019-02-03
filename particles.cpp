@@ -490,26 +490,26 @@ float get_emitter_life(Emitter_Parameters *EP, Emitter_Instance *E)
     return clamp01(1.0f - life10);
 }
 
-float eval_f1(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
+float eval_f1(FXVM_Machine *vm, float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
 {
     FXVM_State state = { };
-    exec(state, input, attributes, instance_index, &bytecode);
+    exec(vm, state, input, attributes, instance_index, &bytecode);
     return state.r[0].v[0];
 }
 
-vec3 eval_f3(float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
+vec3 eval_f3(FXVM_Machine *vm, float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
 {
     FXVM_State state = { };
-    exec(state, input, attributes, instance_index, &bytecode);
+    exec(vm, state, input, attributes, instance_index, &bytecode);
     auto r = state.r[0];
     return vec3{r.v[0], r.v[1], r.v[2]};
 }
 
 template <int MAX_GROUP>
-void eval_f1(float *dest, float *input, float **attributes, int instance_index, int instance_count, FXVM_Bytecode bytecode)
+void eval_f1(FXVM_Machine *vm, float *dest, float *input, float **attributes, int instance_index, int instance_count, FXVM_Bytecode bytecode)
 {
     FXVM_State state[MAX_GROUP] = { };
-    exec(state, input, attributes, instance_index, instance_count, &bytecode);
+    exec(vm, state, input, attributes, instance_index, instance_count, &bytecode);
     for (int i = 0; i < instance_count; i++)
     {
         auto r = state[i].r[0];
@@ -518,10 +518,10 @@ void eval_f1(float *dest, float *input, float **attributes, int instance_index, 
 }
 
 template <int MAX_GROUP>
-void eval_f3(vec3 *dest, float *input, float **attributes, int instance_index, int instance_count, FXVM_Bytecode bytecode)
+void eval_f3(FXVM_Machine *vm, vec3 *dest, float *input, float **attributes, int instance_index, int instance_count, FXVM_Bytecode bytecode)
 {
     FXVM_State state[MAX_GROUP] = { };
-    exec(state, input, attributes, instance_index, instance_count, &bytecode);
+    exec(vm, state, input, attributes, instance_index, instance_count, &bytecode);
     for (int i = 0; i < instance_count; i++)
     {
         auto r = state[i].r[0];
@@ -529,7 +529,7 @@ void eval_f3(vec3 *dest, float *input, float **attributes, int instance_index, i
     }
 }
 
-void emit(Particle_System *PS, Emitter_Instance *E, float dt)
+void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
 {
     //Particles *P = &E->P[E->frame & 1];
     Particles *P = &E->P[(E->frame+1) & 1];
@@ -555,8 +555,8 @@ void emit(Particle_System *PS, Emitter_Instance *E, float dt)
     {
         global_input[PS->emitter.random_i] = random01();
         //P->position[index] = vec3{0.0f, 0.0f, 0.0f};
-        P->position[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_position_bc) + E->position;
-        P->velocity[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_velocity_bc);
+        P->position[index] = eval_f3(vm, global_input, nullptr, 0, PS->emitter.initial_position_bc) + E->position;
+        P->velocity[index] = eval_f3(vm, global_input, nullptr, 0, PS->emitter.initial_velocity_bc);
         //fflush(stdout);exit(0);
         //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
         P->acceleration[index] = PS->emitter.acceleration;//vec3{0.0f, -1.0f, 0.0f};
@@ -647,14 +647,14 @@ int compact(Emitter_Instance *E)
     return j;
 }
 
-void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
+void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
 {
     compact(E);
 
     //E->particles_alive = 0;
     if (E->life > 0.0f)
     {
-        emit(PS, E, dt);
+        emit(vm, PS, E, dt);
     }
 
     Particles *P = &E->P[E->frame & 1];
@@ -721,14 +721,14 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
         {
             global_input[PS->random_i] = random01();
 
-            eval_f3<16>(&P->acceleration[i], global_input, attributes, i, group_size, PS->acceleration);
+            eval_f3<16>(vm, &P->acceleration[i], global_input, attributes, i, group_size, PS->acceleration);
         }
         if (i < E->particles_alive)
         {
             global_input[PS->random_i] = random01();
 
             int last_group = E->particles_alive - i;
-            eval_f3<16>(&P->acceleration[i], global_input, attributes, i, last_group, PS->acceleration);
+            eval_f3<16>(vm, &P->acceleration[i], global_input, attributes, i, last_group, PS->acceleration);
         }
     }
 
@@ -763,14 +763,14 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
         {
             global_input[PS->random_i] = random01();
 
-            eval_f1<16>(&P->size[i], global_input, attributes, i, group_size, PS->size);
+            eval_f1<16>(vm, &P->size[i], global_input, attributes, i, group_size, PS->size);
         }
         if (i < E->particles_alive)
         {
             global_input[PS->random_i] = random01();
 
             int last_group = E->particles_alive - i;
-            eval_f1<16>(&P->size[i], global_input, attributes, i, last_group, PS->size);
+            eval_f1<16>(vm, &P->size[i], global_input, attributes, i, last_group, PS->size);
         }
     }
     {
@@ -780,14 +780,14 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
         {
             global_input[PS->random_i] = random01();
 
-            eval_f3<16>(&P->color[i], global_input, attributes, i, group_size, PS->color);
+            eval_f3<16>(vm, &P->color[i], global_input, attributes, i, group_size, PS->color);
         }
         if (i < E->particles_alive)
         {
             global_input[PS->random_i] = random01();
 
             int last_group = E->particles_alive - i;
-            eval_f3<16>(&P->color[i], global_input, attributes, i, last_group, PS->color);
+            eval_f3<16>(vm, &P->color[i], global_input, attributes, i, last_group, PS->color);
         }
     }
 #else
@@ -816,7 +816,7 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
         vec3 acceleration = PS->emitter.acceleration;
         if (PS->acceleration.code)
         {
-            acceleration = eval_f3(global_input, attributes, i, PS->acceleration);
+            acceleration = eval_f3(vm, global_input, attributes, i, PS->acceleration);
         }
 
         vec3 vel = P1->velocity[i];
@@ -832,8 +832,8 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
         P->velocity[i] = velocity;
         P->position[i] = position;
 
-        P->size[i] = eval_f1(global_input, attributes, i, PS->size);
-        P->color[i] = eval_f3(global_input, attributes, i, PS->color);
+        P->size[i] = eval_f1(vm, global_input, attributes, i, PS->size);
+        P->color[i] = eval_f3(vm, global_input, attributes, i, PS->color);
 
         P->random[i] = P1->random[i];
         //printf("P color: %.2f %.2f %.2f\n", P->color[i].x, P->color[i].y, P->color[i].z);
@@ -1117,6 +1117,8 @@ int main(int argc, char **argv)
     Particle_System PS2 = create_psys2();
     Emitter_Instance E2 = new_emitter(&PS2, vec3{2, 0, 0});
 
+    FXVM_Machine vm = fxvm_new();
+
     //exit(0);
 
     Camera camera = { };
@@ -1174,8 +1176,8 @@ int main(int argc, char **argv)
         while (time_accum >= sim_dt)
         {
             uint64_t start_cycles = __rdtsc();
-            simulate(&PS1, &E1, sim_dt * 0.25f * 4);
-            simulate(&PS2, &E2, sim_dt * 0.25f * 4);
+            simulate(&vm, &PS1, &E1, sim_dt * 0.25f * 4);
+            simulate(&vm, &PS2, &E2, sim_dt * 0.25f * 4);
             uint64_t end_cycles = __rdtsc();
 
             sim_ticks = end_cycles - start_cycles;

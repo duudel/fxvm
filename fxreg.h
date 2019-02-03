@@ -17,13 +17,56 @@ struct Reg
     };
 };
 
+#include <cstdint>
+
+struct pcg32_random_t
+{
+    uint64_t state;
+    uint64_t inc;
+};
+
 #ifdef FXVM_IMPL
 
-#include <cstdint>
+#define PCG32_INITIALIZER { 0x853c49e6748fea9bULL, 0xda3e39cb94b95bdbULL }
+
+uint32_t pcg32_random_r(pcg32_random_t* rng);
+
+void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq)
+{
+    rng->state = 0U;
+    rng->inc = (initseq << 1u) | 1u;
+    pcg32_random_r(rng);
+    rng->state += initstate;
+    pcg32_random_r(rng);
+}
+
+uint32_t pcg32_random_r(pcg32_random_t* rng)
+{
+    uint64_t oldstate = rng->state;
+    rng->state = oldstate * 6364136223846793005ULL + rng->inc;
+    uint32_t xorshifted = ((oldstate >> 18u) ^ oldstate) >> 27u;
+    uint32_t rot = oldstate >> 59u;
+    return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
+}
+
+inline float random01_float(pcg32_random_t *rng)
+{
+    return (float)pcg32_random_r(rng) / (1ull << 32);
+}
+
 #include <cmath>
 
 #ifndef USE_SSE
 // !USE_SSE
+
+inline Reg reg_random01(pcg32_random_t *rng)
+{
+    float x = random01_float(rng);
+    float y = random01_float(rng);
+    float z = random01_float(rng);
+    float w = random01_float(rng);
+    return { x, y, z, w };
+}
 
 inline Reg reg_load(const uint8_t *p)
 {
@@ -172,6 +215,15 @@ inline Reg reg_interp_by_scalar(Reg a, Reg b, Reg t)
 
 #include <xmmintrin.h>
 
+inline Reg reg_random01(pcg32_random_t *rng)
+{
+    float x = random01_float(rng);
+    float y = random01_float(rng);
+    float z = random01_float(rng);
+    float w = random01_float(rng);
+    return { x, y, z, w };
+}
+
 inline Reg reg_load(const uint8_t *p)
 { return Reg{ .v4 = _mm_loadu_ps((const float*)p) }; }
 
@@ -268,11 +320,9 @@ inline Reg reg_sqrt(Reg a)
 #include "sincos_ps.h"
 
 inline Reg reg_sin(Reg a)
-//{ return { sinf(a.v[0]), sinf(a.v[1]), sinf(a.v[2]), sinf(a.v[3]) }; }
 { return Reg{ .v4 = sin_ps(a.v4) }; }
 
 inline Reg reg_cos(Reg a)
-//{ return { cosf(a.v[0]), cosf(a.v[1]), cosf(a.v[2]), cosf(a.v[3]) }; }
 { return Reg{ .v4 = cos_ps(a.v4) }; }
 
 inline Reg reg_exp(Reg a)
