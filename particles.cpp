@@ -165,17 +165,33 @@ float clamp01(float x)
     return (x > 1.0f) ? 1.0f : ((x < 0.0f) ? 0.0f : x);
 }
 
-
 struct vec3
 {
+#ifdef USE_SSE
+    union
+    {
+        struct { float x, y, z; };
+        __m128 v4;
+    };
+#else
     float x, y, z;
+#endif
 };
 
 struct vec4
 {
+#ifdef USE_SSE
+    union
+    {
+        struct { float x, y, z, w; };
+        __m128 v4;
+    };
+#else
     float x, y, z, w;
+#endif
 };
 
+#ifndef USE_SSE
 vec3 operator - (vec3 a) { return {-a.x, -a.y, -a.z}; }
 vec3 operator + (vec3 a, vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 vec3 operator - (vec3 a, vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
@@ -220,6 +236,58 @@ vec4 normalize(vec4 a)
     float L = sqrt(L2);
     return a / L;
 }
+
+#else
+// USE_SSE
+
+vec3 operator - (vec3 a) { return vec3{ .v4 = _mm_xor_ps(a.v4, _mm_set1_ps(-0.0f)) }; }
+vec3 operator + (vec3 a, vec3 b) { return vec3{ .v4 = _mm_add_ps(a.v4, b.v4) }; }
+vec3 operator - (vec3 a, vec3 b) { return vec3{ .v4 = _mm_sub_ps(a.v4, b.v4) }; }
+vec3 operator * (vec3 a, vec3 b) { return vec3{ .v4 = _mm_mul_ps(a.v4, b.v4) }; }
+vec3 operator / (vec3 a, vec3 b) { return vec3{ .v4 = _mm_div_ps(a.v4, b.v4) }; }
+vec3 operator * (vec3 a, float t) { return vec3{ .v4 = _mm_mul_ps(a.v4, _mm_set1_ps(t)) }; }
+vec3 operator / (vec3 a, float t) { return vec3{ .v4 = _mm_div_ps(a.v4, _mm_set1_ps(t)) }; }
+
+float dot(vec3 a, vec3 b)
+{
+    //vec3 r = vec3{ .v4 = _mm_mul_ps(a.v4, b.v4) };
+    //return r.x + r.y + r.z;
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+vec3 cross(vec3 a, vec3 b)
+{
+    return {a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x};
+}
+
+vec3 normalize(vec3 a)
+{
+    float L2 = dot(a, a);
+    __m128 L = _mm_rsqrt_ps(_mm_set1_ps(L2));
+    return vec3{ .v4 = _mm_mul_ps(a.v4, L) };
+}
+
+vec4 operator - (vec4 a) { return vec4{ .v4 = _mm_xor_ps(a.v4, _mm_set1_ps(-0.0f)) }; }
+vec4 operator + (vec4 a, vec4 b) { return vec4{ .v4 = _mm_add_ps(a.v4, b.v4) }; }
+vec4 operator - (vec4 a, vec4 b) { return vec4{ .v4 = _mm_sub_ps(a.v4, b.v4) }; }
+vec4 operator * (vec4 a, vec4 b) { return vec4{ .v4 = _mm_mul_ps(a.v4, b.v4) }; }
+vec4 operator / (vec4 a, vec4 b) { return vec4{ .v4 = _mm_div_ps(a.v4, b.v4) }; }
+vec4 operator * (vec4 a, float t) { return vec4{ .v4 = _mm_mul_ps(a.v4, _mm_set1_ps(t)) }; }
+vec4 operator / (vec4 a, float t) { return vec4{ .v4 = _mm_div_ps(a.v4, _mm_set1_ps(t)) }; }
+
+float dot(vec4 a, vec4 b)
+{
+    vec4 r = vec4{ .v4 = _mm_mul_ps(a.v4, b.v4) };
+    return r.x + r.y + r.z + r.w;
+}
+
+vec4 normalize(vec4 a)
+{
+    float L2 = dot(a, a);
+    __m128 L = _mm_rsqrt_ps(_mm_set1_ps(L2));
+    return vec4{ .v4 = _mm_mul_ps(a.v4, L) };
+}
+#endif
 
 struct mat4
 {
@@ -437,6 +505,30 @@ vec3 eval_f3(float *input, float **attributes, int instance_index, FXVM_Bytecode
     return vec3{r.v[0], r.v[1], r.v[2]};
 }
 
+template <int MAX_GROUP>
+void eval_f1(float *dest, float *input, float **attributes, int instance_index, int instance_count, FXVM_Bytecode bytecode)
+{
+    FXVM_State state[MAX_GROUP] = { };
+    exec(state, input, attributes, instance_index, instance_count, &bytecode);
+    for (int i = 0; i < instance_count; i++)
+    {
+        auto r = state[i].r[0];
+        dest[i] = r.v[0];
+    }
+}
+
+template <int MAX_GROUP>
+void eval_f3(vec3 *dest, float *input, float **attributes, int instance_index, int instance_count, FXVM_Bytecode bytecode)
+{
+    FXVM_State state[MAX_GROUP] = { };
+    exec(state, input, attributes, instance_index, instance_count, &bytecode);
+    for (int i = 0; i < instance_count; i++)
+    {
+        auto r = state[i].r[0];
+        dest[i] = vec3{r.v[0], r.v[1], r.v[2]};
+    }
+}
+
 void emit(Particle_System *PS, Emitter_Instance *E, float dt)
 {
     //Particles *P = &E->P[E->frame & 1];
@@ -551,48 +643,6 @@ int compact(Emitter_Instance *E)
         }
     }
 
-    /*
-    struct K
-    {
-    static uint8_t key(float x)
-    {
-        union { float f; uint32_t u; };
-        f = x;
-        return (uint8_t)(u >> (32-(8+1)));
-    }
-    };
-
-    for (int i = 0; i < j - 1; i++)
-    {
-        //uint8_t k0 = K::key(P0->life_seconds[i]);
-        //uint8_t k1 = k0;
-        float k0 = P0->life_seconds[i];
-        float k1 = k0;
-        int h;
-        for (h = i + 1; h < j; h++)
-        {
-            //uint8_t k = K::key(P0->life_seconds[h]);
-            float k = P0->life_seconds[h];
-            if (k0 > k)
-            {
-                break;
-            }
-            k1 = k;
-        }
-        if (k1 > k0)
-        {
-            swap(P0->life_seconds[h], P0->life_seconds[i]);
-            swap(P0->life_max[h], P0->life_max[i]);
-            swap(P0->position[h], P0->position[i]);
-            swap(P0->velocity[h], P0->velocity[i]);
-            swap(P0->acceleration[h], P0->acceleration[i]);
-            swap(P0->size[h], P0->size[i]);
-            swap(P0->color[h], P0->color[i]);
-            swap(P0->random[h], P0->random[i]);
-        }
-    }
-    */
-
     E->particles_alive = j;
     return j;
 }
@@ -652,7 +702,7 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
             E->particles_alive++;
         }
     }
-#elif 0
+#elif 1
     float global_input[16];
     float *attributes[16];
     attributes[PS->attrib_life] = P->life_01;
@@ -663,6 +713,25 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
 
     global_input[PS->emitter_life_i] = get_emitter_life(&PS->emitter, E);
 
+    if (PS->acceleration.code)
+    {
+        const int group_size = 16;
+        int i = 0;
+        for (; i + group_size - 1 < E->particles_alive; i += group_size)
+        {
+            global_input[PS->random_i] = random01();
+
+            eval_f3<16>(&P->acceleration[i], global_input, attributes, i, group_size, PS->acceleration);
+        }
+        if (i < E->particles_alive)
+        {
+            global_input[PS->random_i] = random01();
+
+            int last_group = E->particles_alive - i;
+            eval_f3<16>(&P->acceleration[i], global_input, attributes, i, last_group, PS->acceleration);
+        }
+    }
+
     for (int i = 0; i < E->particles_alive; i++)
     {
         float life_seconds = P->life_seconds[i] - dt;
@@ -672,19 +741,8 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
         P->life_01[i] = 1.0f - life_seconds * (1.0f / P->life_max[i]);
 
         vec3 acceleration = PS->emitter.acceleration;
-        if (PS->acceleration.code)
-        {
-        //for (int i = 0; i < E->particles_alive; i++)
-        //{
-            global_input[PS->random_i] = random01();
+        if (PS->acceleration.code) acceleration = P->acceleration[i];
 
-            acceleration = eval_f3(global_input, attributes, i, PS->acceleration);
-        //}
-        }
-
-    //}
-    //for (int i = 0; i < E->particles_alive; i++)
-    //{
         vec3 vel = P->velocity[i];
         float v2 = -dot(vel, vel);
         vec3 Fd = normalize(vel) * v2 * drag;   // drag force
@@ -698,17 +756,39 @@ void simulate(Particle_System *PS, Emitter_Instance *E, float dt)
         P->velocity[i] = velocity;
         P->position[i] = position;
     }
-    for (int i = 0; i < E->particles_alive; i++)
     {
-        global_input[PS->random_i] = random01();
+        const int group_size = 16;
+        int i = 0;
+        for (; i + group_size - 1 < E->particles_alive; i += group_size)
+        {
+            global_input[PS->random_i] = random01();
 
-        P->size[i] = eval_f1(global_input, attributes, i, PS->size);
+            eval_f1<16>(&P->size[i], global_input, attributes, i, group_size, PS->size);
+        }
+        if (i < E->particles_alive)
+        {
+            global_input[PS->random_i] = random01();
+
+            int last_group = E->particles_alive - i;
+            eval_f1<16>(&P->size[i], global_input, attributes, i, last_group, PS->size);
+        }
     }
-    for (int i = 0; i < E->particles_alive; i++)
     {
-        global_input[PS->random_i] = random01();
+        const int group_size = 16;
+        int i = 0;
+        for (; i + group_size - 1 < E->particles_alive; i += group_size)
+        {
+            global_input[PS->random_i] = random01();
 
-        P->color[i] = eval_f3(global_input, attributes, i, PS->color);
+            eval_f3<16>(&P->color[i], global_input, attributes, i, group_size, PS->color);
+        }
+        if (i < E->particles_alive)
+        {
+            global_input[PS->random_i] = random01();
+
+            int last_group = E->particles_alive - i;
+            eval_f3<16>(&P->color[i], global_input, attributes, i, last_group, PS->color);
+        }
     }
 #else
     auto P1 = &E->P[(E->frame + 0) & 1];
