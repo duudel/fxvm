@@ -1,14 +1,29 @@
 #ifndef FXVM_REG
 
+#define USE_SSE
+
+#ifdef USE_SSE
+#include <intrin.h>
+#endif
+
 struct Reg
 {
-    float v[4];
+    union
+    {
+        float v[4];
+#ifdef USE_SSE
+        __m128 v4;
+#endif
+    };
 };
 
 #ifdef FXVM_IMPL
 
 #include <cstdint>
 #include <cmath>
+
+#ifndef USE_SSE
+// !USE_SSE
 
 inline Reg reg_load(const uint8_t *p)
 {
@@ -151,6 +166,214 @@ inline Reg reg_interp(Reg a, Reg b, Reg t)
 
 inline Reg reg_interp_by_scalar(Reg a, Reg b, Reg t)
 { return { interp(a.v[0], b.v[0], t.v[0]), interp(a.v[1], b.v[1], t.v[0]), interp(a.v[2], b.v[2], t.v[0]), interp(a.v[3], b.v[3], t.v[0]) }; }
+
+#else
+// USE_SSE
+
+#include <xmmintrin.h>
+
+inline Reg reg_load(const uint8_t *p)
+{ return Reg{ .v4 = _mm_loadu_ps((const float*)p) }; }
+
+inline Reg reg_swizzle(Reg a, uint8_t mask)
+{
+    //uint8_t i0 = mask & 0x3;
+    //uint8_t i1 = (mask >> 2) & 0x3;
+    //uint8_t i2 = (mask >> 4) & 0x3;
+    //uint8_t i3 = (mask >> 6) & 0x3;
+    //return { a.v[i0], a.v[i1], a.v[i2], a.v[i3] };
+#define SHUFFLES(x) \
+    case 0x00|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x00|x) }; \
+    case 0x01|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x01|x) }; \
+    case 0x02|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x02|x) }; \
+    case 0x03|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x03|x) }; \
+    case 0x04|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x04|x) }; \
+    case 0x05|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x05|x) }; \
+    case 0x06|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x06|x) }; \
+    case 0x07|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x07|x) }; \
+    case 0x08|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x08|x) }; \
+    case 0x09|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x09|x) }; \
+    case 0x0a|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x0a|x) }; \
+    case 0x0b|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x0b|x) }; \
+    case 0x0c|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x0c|x) }; \
+    case 0x0d|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x0d|x) }; \
+    case 0x0e|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x0e|x) }; \
+    case 0x0f|x: return Reg{ .v4 = _mm_shuffle_ps(a.v4, a.v4, 0x0f|x) }; \
+
+    switch (mask)
+    {
+        SHUFFLES(0x00)
+        SHUFFLES(0x10)
+        SHUFFLES(0x20)
+        SHUFFLES(0x30)
+        SHUFFLES(0x40)
+        SHUFFLES(0x50)
+        SHUFFLES(0x60)
+        SHUFFLES(0x70)
+        SHUFFLES(0x80)
+        SHUFFLES(0x90)
+        SHUFFLES(0xa0)
+        SHUFFLES(0xb0)
+        SHUFFLES(0xc0)
+        SHUFFLES(0xd0)
+        SHUFFLES(0xe0)
+        SHUFFLES(0xf0)
+    }
+    // invalid swizzle
+    return a;
+}
+
+inline Reg reg_mov_x(Reg x)
+{ return x; }
+
+inline Reg reg_mov_xy(Reg x, Reg y)
+{ return { x.v[0], y.v[0], 0.0f, 0.0f }; }
+
+inline Reg reg_mov_xyz(Reg x, Reg y, Reg z)
+{ return { x.v[0], y.v[0], z.v[0], 0.0f }; }
+
+inline Reg reg_mov_xyzw(Reg x, Reg y, Reg z, Reg w)
+{ return { x.v[0], y.v[0], z.v[0], w.v[0] }; }
+
+inline Reg reg_neg(Reg a)
+{ return Reg{ .v4 = _mm_xor_ps(a.v4, _mm_set1_ps(-0.0f)) }; }
+
+inline Reg reg_add(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_add_ps(a.v4, b.v4) }; }
+
+inline Reg reg_sub(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_sub_ps(a.v4, b.v4) }; }
+
+inline Reg reg_mul(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_mul_ps(a.v4, b.v4) }; }
+
+inline Reg reg_mul_by_scalar(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_mul_ps(a.v4, _mm_shuffle_ps(b.v4, b.v4, 0)) }; }
+
+inline Reg reg_div(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_div_ps(a.v4, b.v4) }; }
+
+inline Reg reg_div_by_scalar(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_div_ps(a.v4, _mm_shuffle_ps(b.v4, b.v4, 0)) }; }
+
+inline Reg reg_rcp(Reg a)
+{ return Reg{ .v4 = _mm_rcp_ps(a.v4) }; }
+
+inline Reg reg_rsqrt(Reg a)
+{ return Reg{ .v4 = _mm_rsqrt_ps(a.v4) }; }
+
+inline Reg reg_sqrt(Reg a)
+{ return Reg{ .v4 = _mm_sqrt_ps(a.v4) }; }
+
+#include "sincos_ps.h"
+
+inline Reg reg_sin(Reg a)
+//{ return { sinf(a.v[0]), sinf(a.v[1]), sinf(a.v[2]), sinf(a.v[3]) }; }
+{ return Reg{ .v4 = sin_ps(a.v4) }; }
+
+inline Reg reg_cos(Reg a)
+//{ return { cosf(a.v[0]), cosf(a.v[1]), cosf(a.v[2]), cosf(a.v[3]) }; }
+{ return Reg{ .v4 = cos_ps(a.v4) }; }
+
+inline Reg reg_exp(Reg a)
+{ return { expf(a.v[0]), expf(a.v[1]), expf(a.v[2]), expf(a.v[3]) }; }
+
+inline Reg reg_exp2(Reg a)
+{ return { exp2f(a.v[0]), exp2f(a.v[1]), exp2f(a.v[2]), exp2f(a.v[3]) }; }
+
+inline float exp10f(float v) { return expf(v) / expf(10.0f); }
+
+inline Reg reg_exp10(Reg a)
+{ return { exp10f(a.v[0]), exp10f(a.v[1]), exp10f(a.v[2]), exp10f(a.v[3]) }; }
+
+inline Reg reg_trunc(Reg a)
+{
+    __m128i i4 = _mm_cvttps_epi32(a.v4);
+    return Reg{ .v4 = _mm_cvtepi32_ps(i4) };
+}
+
+inline Reg reg_fract(Reg a)
+{
+    __m128i i4 = _mm_cvttps_epi32(a.v4);
+    return Reg{ .v4 = _mm_sub_ps(a.v4, _mm_cvtepi32_ps(i4)) };
+}
+
+inline Reg reg_abs(Reg a)
+{ return Reg{ .v4 = _mm_and_ps(a.v4, (__m128)_mm_set1_epi32(0x7fffffff)) }; }
+
+inline Reg reg_min(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_min_ps(a.v4, b.v4) }; }
+
+inline Reg reg_max(Reg a, Reg b)
+{ return Reg{ .v4 = _mm_max_ps(a.v4, b.v4) }; }
+
+inline float reg_dot1(Reg a, Reg b)
+{ return a.v[0] * b.v[0]; }
+
+inline float reg_dot2(Reg a, Reg b)
+{ return a.v[0] * b.v[0] + a.v[1] * b.v[1]; }
+
+inline float reg_dot3(Reg a, Reg b)
+{
+    Reg r = Reg{ .v4 = _mm_mul_ps(a.v4, b.v4) };
+    return r.v[0] + r.v[1] + r.v[2];
+}
+
+inline float reg_dot4(Reg a, Reg b)
+{
+    Reg r = Reg{ .v4 = _mm_mul_ps(a.v4, b.v4) };
+    return r.v[0] + r.v[1] + r.v[2] + r.v[3];
+}
+
+inline Reg reg_normalize1(Reg a)
+{ return { 1.0f, a.v[1], a.v[2], a.v[3] }; }
+
+inline Reg reg_normalize2(Reg a)
+{
+    float len2 = reg_dot2(a, a);
+    __m128 k = _mm_rsqrt_ps(_mm_set1_ps(len2));
+    return Reg{ .v4 = _mm_mul_ps(a.v4, k) };
+}
+
+inline Reg reg_normalize3(Reg a)
+{
+    float len2 = reg_dot3(a, a);
+    __m128 k = _mm_rsqrt_ps(_mm_set1_ps(len2));
+    return Reg{ .v4 = _mm_mul_ps(a.v4, k) };
+}
+
+inline Reg reg_normalize4(Reg a)
+{
+    float len2 = reg_dot2(a, a);
+    __m128 k = _mm_rsqrt_ps(_mm_set1_ps(len2));
+    return Reg{ .v4 = _mm_mul_ps(a.v4, k) };
+}
+
+inline Reg reg_clamp01(Reg a)
+{
+    __m128 zero = _mm_setzero_ps();
+    __m128 one = _mm_set1_ps(1.0f);
+    return Reg{ .v4 = _mm_min_ps(_mm_max_ps(a.v4, zero), one) };
+}
+
+inline Reg reg_clamp(Reg x, Reg a, Reg b)
+{
+    return Reg{ .v4 = _mm_min_ps(_mm_max_ps(x.v4, a.v4), b.v4) };
+}
+
+inline Reg reg_interp(Reg a, Reg b, Reg t)
+{
+    __m128 one_minus_t = _mm_sub_ps(_mm_set1_ps(1.0f), t.v4);
+    return Reg{ .v4 = _mm_add_ps(_mm_mul_ps(a.v4, one_minus_t), _mm_mul_ps(b.v4, t.v4)) };
+}
+
+inline Reg reg_interp_by_scalar(Reg a, Reg b, Reg t)
+{
+    __m128 tt = _mm_shuffle_ps(t.v4, t.v4, _MM_SHUFFLE(0, 0, 0, 0));
+    __m128 one_minus_t = _mm_sub_ps(_mm_set1_ps(1.0f), tt);
+    return Reg{ .v4 = _mm_add_ps(_mm_mul_ps(a.v4, one_minus_t), _mm_mul_ps(b.v4, tt)) };
+}
+#endif
 
 #endif
 

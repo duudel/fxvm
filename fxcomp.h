@@ -17,6 +17,7 @@ enum FXVM_TokenKind
     FXTOK_PAREN_L,
     FXTOK_PAREN_R,
     FXTOK_COMMA,
+    FXTOK_PERIOD,
 };
 
 struct FXVM_Token
@@ -74,6 +75,28 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+
+#ifdef __linux__
+#include <csignal>
+void debug_break() { raise(SIGTRAP); }
+#else // WINDOWS
+void __debugbreak();
+void debug_break() { __debugbreak(); }
+#endif
+
+#define FXVM_ICE(x) fxvm_ice(x, __FILE__, __LINE__, __func__)
+
+static void fxvm_ice(const char *msg, const char *file, int line, const char *func)
+{
+    printf("^^^^^^^^^^^^^^^^^^^^\n");
+    printf("%s:%d: !!FXVM ICE!!\n", file, line);
+    printf("  in function %s:\n\n", func);
+    printf("    %s\n\n", msg);
+    printf("^^^^^^^^^^^^^^^^^^^^\n");
+    fflush(stdout);
+    debug_break();
+}
+
 
 void invalid_char(FXVM_Compiler *compiler, const char *c)
 {
@@ -232,6 +255,10 @@ bool tokenize(FXVM_Compiler *compiler, const char *source, const char *source_en
             push_token(compiler, FXTOK_COMMA, c, c + 1);
             c++;
             break;
+        case '.':
+            push_token(compiler, FXTOK_PERIOD, c, c + 1);
+            c++;
+            break;
         default:
             if (('A' <= c[0] && c[0] <= 'Z') || ('a' <= c[0] && c[0] <= 'z'))
             {
@@ -258,6 +285,7 @@ enum FXVM_AstKind
     FXAST_EXPR_VARIABLE,
     FXAST_EXPR_NUMBER,
     FXAST_EXPR_CALL,
+    FXAST_EXPR_SWIZZLE,
 };
 
 enum FXVM_AstUnaryOp
@@ -276,6 +304,14 @@ enum FXVM_AstBinaryOp
     FXAST_OP_ASSIGN,
 };
 
+enum FXVM_AstSwizzleOp
+{
+    FXSZ_X = 0,
+    FXSZ_Y = 1,
+    FXSZ_Z = 2,
+    FXSZ_W = 3,
+};
+
 struct FXVM_Ast;
 
 struct FXAST_Nodes
@@ -287,14 +323,21 @@ struct FXAST_Nodes
 
 struct FXAST_UnaryExpr
 {
-    FXVM_AstUnaryOp op;
     FXVM_Ast *operand;
+    FXVM_AstUnaryOp op;
 };
 
 struct FXAST_BinaryExpr
 {
-    FXVM_AstBinaryOp op;
     FXVM_Ast *left, *right;
+    FXVM_AstBinaryOp op;
+};
+
+struct FXAST_SwizzleExpr
+{
+    FXVM_Ast *operand;
+    uint8_t mask;
+    int8_t len;
 };
 
 struct FXAST_Variable
@@ -325,6 +368,7 @@ struct FXVM_Ast
         FXAST_Variable variable;
         FXAST_Number number;
         FXAST_Call call;
+        FXAST_SwizzleExpr swizzle;
     };
 
     FXVM_Type type;
@@ -379,6 +423,7 @@ const char* token_kind_to_string(FXVM_TokenKind kind)
     {
     case FXTOK_ASSIGN: return "=";
     case FXTOK_COMMA: return ",";
+    case FXTOK_PERIOD: return ".";
     case FXTOK_IDENT: return "identifier";
     case FXTOK_MINUS: return "-";
     case FXTOK_NUMBER: return "number";
@@ -430,6 +475,28 @@ void expected_expression(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
     }
 }
 
+void too_long_swizzle(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
+{
+    compiler->error_num++;
+    if (compiler->report_error)
+    {
+        char buf[64];
+        snprintf(buf, 64, "swizzle pattern is too long"); (void)tokens;
+        compiler->report_error(buf);
+    }
+}
+
+void invalid_swizzle_pattern(FXVM_Compiler *compiler, FXVM_Tokens *tokens, char c)
+{
+    compiler->error_num++;
+    if (compiler->report_error)
+    {
+        char buf[64];
+        snprintf(buf, 64, "swizzle pattern contains invalid character '%c'", c); (void)tokens;
+        compiler->report_error(buf);
+    }
+}
+
 FXVM_Ast* parse_expression(FXVM_Compiler *compiler, FXVM_Tokens *tokens);
 
 FXVM_Ast* parse_factor(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
@@ -441,12 +508,14 @@ FXVM_Ast* parse_factor(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
         term->number.token = number_tok;
         return term;
     }
+
+    FXVM_Ast *term = nullptr;
     FXVM_Token *ident_tok = nullptr;
     if ((ident_tok = accept(compiler, tokens, FXTOK_IDENT)))
     {
         if (accept(compiler, tokens, FXTOK_PAREN_L))
         {
-            FXVM_Ast *term = alloc_node(compiler, FXAST_EXPR_CALL);
+            term = alloc_node(compiler, FXAST_EXPR_CALL);
             term->call.token = ident_tok;
             bool comma = false;
             while (tokens->t < tokens->end)
@@ -467,26 +536,66 @@ FXVM_Ast* parse_factor(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
                     break;
             }
             expect(compiler, tokens, FXTOK_PAREN_R);
-            return term;
         }
         else
         {
-            FXVM_Ast *term = alloc_node(compiler, FXAST_EXPR_VARIABLE);
+            term = alloc_node(compiler, FXAST_EXPR_VARIABLE);
             term->variable.token = ident_tok;
-            return term;
         }
     }
-    if (accept(compiler, tokens, FXTOK_PAREN_L))
+    else if (accept(compiler, tokens, FXTOK_PAREN_L))
     {
-        FXVM_Ast *term = parse_expression(compiler, tokens);
+        term = parse_expression(compiler, tokens);
         if (!term)
         {
             expected_expression(compiler, tokens);
         }
         expect(compiler, tokens, FXTOK_PAREN_R);
-        return term;
     }
-    return nullptr;
+
+    // postfix operators
+    if (accept(compiler, tokens, FXTOK_PERIOD))
+    {
+        FXVM_Token *swizzle_tok = expect(compiler, tokens, FXTOK_IDENT);
+        if (swizzle_tok)
+        {
+            const char *swizzle_p = swizzle_tok->start;
+            int swizzle_len = swizzle_tok->end - swizzle_p;
+            if (swizzle_len > 4)
+            {
+                too_long_swizzle(compiler, tokens);
+            }
+            else
+            {
+                uint8_t swizzle_mask = 0;
+                for (int i = 0; i < swizzle_len; i++)
+                {
+                    switch (swizzle_p[i])
+                    {
+                    case 'x':
+                        swizzle_mask |= (uint32_t)FXSZ_X << (i * 2); break;
+                    case 'y':
+                        swizzle_mask |= (uint32_t)FXSZ_Y << (i * 2); break;
+                    case 'z':
+                        swizzle_mask |= (uint32_t)FXSZ_Z << (i * 2); break;
+                    case 'w':
+                        swizzle_mask |= (uint32_t)FXSZ_W << (i * 2); break;
+                    default:
+                        invalid_swizzle_pattern(compiler, tokens, swizzle_p[i]);
+                        break;
+                    }
+                }
+                FXVM_Ast *swizzle_expr = alloc_node(compiler, FXAST_EXPR_SWIZZLE);
+                swizzle_expr->swizzle.operand = term;
+                swizzle_expr->swizzle.mask = swizzle_mask;
+                swizzle_expr->swizzle.len = swizzle_len;
+
+                term = swizzle_expr;
+            }
+        }
+    }
+
+    return term;
 }
 
 void invalid_unary_op(FXVM_Compiler *compiler, FXVM_Token *token)
@@ -522,7 +631,7 @@ FXVM_Ast* parse_unary_factor(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
         case FXTOK_PLUS: unary_expr->unary.op = FXAST_OP_PLUS; break;
         case FXTOK_MINUS: unary_expr->unary.op = FXAST_OP_MINUS; break;
         default:
-            // ICE
+            FXVM_ICE("invalid unary operator token");
             break;
         }
         unary_expr->unary.operand = term;
@@ -550,7 +659,7 @@ FXVM_Ast* parse_term(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
             case FXTOK_STAR: binary_expr->binary.op = FXAST_OP_MUL; break;
             case FXTOK_SLASH: binary_expr->binary.op = FXAST_OP_DIV; break;
             default:
-                // ICE
+                FXVM_ICE("invalid binary operator token");
                 break;
             }
             binary_expr->binary.left = expr;
@@ -585,7 +694,7 @@ FXVM_Ast* parse_addition(FXVM_Compiler *compiler, FXVM_Tokens *tokens)
             case FXTOK_PLUS: binary_expr->binary.op = FXAST_OP_ADD; break;
             case FXTOK_MINUS: binary_expr->binary.op = FXAST_OP_SUB; break;
             default:
-                // ICE
+                FXVM_ICE("invalid binary operator token");
                 break;
             }
             binary_expr->binary.left = expr;
@@ -894,25 +1003,67 @@ FXVM_Type type_check_binary(FXVM_Compiler *compiler, FXVM_Ast *ast)
             return ast->type = type_left;
         }
     case FXAST_OP_MUL:
+        {
+            FXVM_Type type_left = type_check(compiler, ast->binary.left);
+            FXVM_Type type_right = type_check(compiler, ast->binary.right);
+            if ((type_left != FXTYP_NONE) && (type_right != FXTYP_NONE))
+            {
+                // If right type if scalar, the left type is the resulting type
+                if (type_right == FXTYP_F1)
+                {
+                    return ast->type = type_left;
+                }
+                // If left type if scalar, the right type is the resulting type
+                else if (type_left == FXTYP_F1)
+                {
+                    return ast->type = type_right;
+                }
+                // Otherwise the types must be the same
+                else if (type_left != type_right)
+                {
+                    invalid_operand_types(compiler, ast->binary.op, type_left, type_right);
+                    return ast->type = FXTYP_NONE;
+                }
+            }
+            return ast->type = FXTYP_NONE;
+        }
     case FXAST_OP_DIV:
         {
             FXVM_Type type_left = type_check(compiler, ast->binary.left);
             FXVM_Type type_right = type_check(compiler, ast->binary.right);
-            // If no error in typing and neither operand is just scalar, the types must be equal.
-            if ((type_left != FXTYP_NONE && type_right != FXTYP_NONE) &&
-                (type_left != FXTYP_F1 && type_right != FXTYP_F1))
+            if ((type_left != FXTYP_NONE) && (type_right != FXTYP_NONE))
             {
-                if (type_left != type_right)
+                // If right type if scalar, the left type is the resulting type
+                if (type_right == FXTYP_F1)
+                {
+                    return ast->type = type_left;
+                }
+                // Otherwise types must be the same.
+                else if (type_left != type_right)
                 {
                     invalid_operand_types(compiler, ast->binary.op, type_left, type_right);
+                    return ast->type = FXTYP_NONE;
                 }
             }
-            return ast->type = type_left;
+            return ast->type = FXTYP_NONE;
         }
     case FXAST_OP_ASSIGN:
         return type_check_assign(compiler, ast);
     }
     return ast->type = FXTYP_F1;
+}
+
+FXVM_Type type_check_swizzle(FXVM_Compiler *compiler, FXVM_Ast *ast)
+{
+    FXVM_Type oper_type = type_check(compiler, ast->swizzle.operand);
+    (void)oper_type;
+    uint32_t mask = ast->swizzle.mask;
+    int len = ((mask & 0xc0) > 0 ? 1 : 0)
+            + ((mask & 0x30) > 0 ? 1 : 0)
+            + ((mask & 0x0c) > 0 ? 1 : 0)
+            + ((mask & 0x03) > 0 ? 1 : 0);
+    FXVM_Type result_type = (FXVM_Type)len;
+    return ast->type = result_type;
 }
 
 void too_long_floating_point_constant(FXVM_Compiler *compiler)
@@ -1044,6 +1195,7 @@ FXVM_Type type_check(FXVM_Compiler *compiler, FXVM_Ast *ast)
         case FXAST_ROOT:            return type_check_root(compiler, ast); break;
         case FXAST_EXPR_UNARY:      return type_check_unary(compiler, ast); break;
         case FXAST_EXPR_BINARY:     return type_check_binary(compiler, ast); break;
+        case FXAST_EXPR_SWIZZLE:    return type_check_swizzle(compiler, ast); break;
         case FXAST_EXPR_NUMBER:     return type_check_number(compiler, ast); break;
         case FXAST_EXPR_VARIABLE:   return type_check_variable_ref(compiler, ast); break;
         case FXAST_EXPR_CALL:       return type_check_call(compiler, ast); break;
@@ -1064,6 +1216,7 @@ enum FXVM_ILOp
     FXIL_LOAD_CONST,
     FXIL_LOAD_INPUT,
     FXIL_LOAD_ATTRIB,
+    FXIL_SWIZZLE,
     FXIL_MOV,
     FXIL_MOV_X,
     FXIL_MOV_XY,
@@ -1105,6 +1258,7 @@ FXVM_ILInstrInfo il_instr_info[] = {
     [FXIL_LOAD_CONST] =  {"FXIL_LOAD_CONST", 1},
     [FXIL_LOAD_INPUT] =  {"FXIL_LOAD_INPUT", 1},
     [FXIL_LOAD_ATTRIB] = {"FXIL_LOAD_ATTRIB", 1},
+    [FXIL_SWIZZLE] =     {"FXIL_SWIZZLE", 2},
     [FXIL_MOV] =         {"FXIL_MOV", 2},
     [FXIL_MOV_X] =       {"FXIL_MOV_X", 2},
     [FXIL_MOV_XY] =      {"FXIL_MOV_XY", 3},
@@ -1154,6 +1308,12 @@ struct FXIL_InputLoad {
     int input_index;
 };
 
+struct FXIL_Swizzle {
+    FXIL_Reg operand;
+    uint8_t mask;
+    int8_t len;
+};
+
 struct FXVM_ILInstr
 {
     FXVM_ILOp op;
@@ -1162,6 +1322,7 @@ struct FXVM_ILInstr
         FXIL_Reg read_operands[4];
         FXIL_ConstantLoad constant_load;
         FXIL_InputLoad input_load;
+        FXIL_Swizzle swizzle;
     };
 };
 
@@ -1232,6 +1393,14 @@ void push_il_mov_xyzw(FXVM_ILContext *ctx, FXIL_Reg target, FXIL_Reg x, FXIL_Reg
     ctx->instr_num = i + 1;
 }
 
+void push_il_swizzle(FXVM_ILContext *ctx, FXIL_Reg target, FXIL_Reg source, uint8_t mask, int8_t len)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { FXIL_SWIZZLE, target, .swizzle = { source, mask, len } };
+    ctx->instr_num = i + 1;
+}
+
 void push_il_load_const(FXVM_ILContext *ctx, FXIL_Reg target, float v)
 {
     ensure_il_instr_fits(ctx);
@@ -1290,10 +1459,8 @@ FXIL_Reg generate_unary_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_
     {
     case FXAST_OP_PLUS:  return generate_plus(compiler, ctx, expr);
     case FXAST_OP_MINUS: return generate_negate(compiler, ctx, expr);
-        default:
-        // ICE
-        break;
     }
+    FXVM_ICE("invalid unary operator");
     return { -1, FXTYP_NONE };
 }
 
@@ -1364,11 +1531,17 @@ FXIL_Reg generate_binary_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM
     case FXAST_OP_MUL: return generate_mul(compiler, ctx, expr);
     case FXAST_OP_DIV: return generate_div(compiler, ctx, expr);
     case FXAST_OP_ASSIGN: return generate_assign(compiler, ctx, expr);
-    default:
-        // ICE
-        break;
     }
+    FXVM_ICE("invalid binary operator");
     return { -1, FXTYP_NONE };
+}
+
+FXIL_Reg generate_swizzle_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr)
+{
+    FXIL_Reg result = new_il_reg(ctx, expr->type);
+    FXIL_Reg oper = generate_expr(compiler, ctx, expr->swizzle.operand);
+    push_il_swizzle(ctx, result, oper, expr->swizzle.mask, expr->swizzle.len);
+    return result;
 }
 
 FXIL_Reg generate_variable(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *expr, int sym_index)
@@ -1413,9 +1586,10 @@ FXIL_Reg generate_variable_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FX
     case FXSYM_GlobalInputVariable: return generate_input_variable(compiler, ctx, expr, sym_index);
     case FXSYM_Attribute: return generate_attribute(compiler, ctx, expr, sym_index);
     case FXSYM_BuiltinFunction:
-        // ICE
-        break;
+        FXVM_ICE("invalid symbol type: builtin function");
+        return { -1, FXTYP_NONE };
     }
+    FXVM_ICE("invalid symbol type: builtin function");
     return { -1, FXTYP_NONE };
 }
 
@@ -1633,7 +1807,7 @@ FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_A
             return builtins[i].emit(compiler, ctx, expr);
         }
     }
-    // ICE
+    FXVM_ICE("no builtin function found");
     return new_il_reg(ctx, expr->type);
 }
 
@@ -1646,10 +1820,10 @@ FXIL_Reg generate_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *n
     case FXAST_EXPR_UNARY:      return generate_unary_expr(compiler, ctx, node);
     case FXAST_EXPR_BINARY:     return generate_binary_expr(compiler, ctx, node);
     case FXAST_EXPR_CALL:       return generate_call_expr(compiler, ctx, node);
-    default:
-        // ICE
-        break;
+    case FXAST_EXPR_SWIZZLE:    return generate_swizzle_expr(compiler, ctx, node);
+    case FXAST_ROOT: break;
     }
+    FXVM_ICE("invalid expression type");
     return { -1, FXTYP_NONE };
 }
 
@@ -1800,6 +1974,14 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
             write_op(gen, FXOP_LOAD_ATTRIBUTE, width);
             write_regs(gen, reg);
             write_input_index(gen, instr->input_load.input_index);
+        } break;
+    case FXIL_SWIZZLE:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            int source_reg = get_register(regs, instr->swizzle.operand);
+            write_op(gen, FXOP_SWIZZLE);
+            write_regs(gen, target_reg, source_reg);
+            write_input_index(gen, instr->swizzle.mask); // assuming 8 bytes
         } break;
     case FXIL_MOV:
         {
@@ -2097,6 +2279,9 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
             case FXIL_LOAD_CONST:
             case FXIL_LOAD_INPUT:
             case FXIL_LOAD_ATTRIB:
+                break;
+            case FXIL_SWIZZLE:
+                read_from(regs, instructions[i].swizzle.operand, i);
                 break;
             case FXIL_MOV:
                 read_from(regs, instructions[i].read_operands[0], i);
