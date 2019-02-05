@@ -548,7 +548,7 @@ void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance
             {
                 uint8_t target_reg = p[1] & 0xf;
                 S.r[target_reg] = reg_random01(&vm->rng);
-                p += 16 + 2;
+                p += 2;
 
                 FXVM_TRACE_OP();
                 FXVM_TRACE("r%d <- ", target_reg);
@@ -1162,7 +1162,7 @@ void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, flo
                 {
                     S[i].r[target_reg] = reg_random01(&vm->rng);
                 }
-                p += 16 + 2;
+                p += 2;
 
                 FXVM_TRACE_OP();
                 FXVM_TRACE("r%d <- ", target_reg);

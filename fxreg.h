@@ -1,6 +1,6 @@
 #ifndef FXVM_REG
 
-#define USE_SSE
+//#define USE_SSE
 
 #ifdef USE_SSE
 #include <intrin.h>
@@ -49,12 +49,24 @@ uint32_t pcg32_random_r(pcg32_random_t* rng)
     return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
 }
 
+uint32_t pcg32_random_fast_r(pcg32_random_t *rng)
+{
+    uint64_t x = rng->state;
+    unsigned count = (unsigned)(x >> 61);	// 61 = 64 - 3
+
+    rng->state = x * 0xf13283ad;
+    x ^= x >> 22;
+    return (uint32_t)(x >> (22 + count));	// 22 = 32 - 3 - 7
+}
+
 inline float random01_float(pcg32_random_t *rng)
 {
-    return (float)pcg32_random_r(rng) / (1ull << 32);
+    return (float)pcg32_random_fast_r(rng) / (1ull << 32);
 }
 
 #include <cmath>
+#include "fast_math.h"
+
 
 #ifndef USE_SSE
 // !USE_SSE
@@ -62,9 +74,9 @@ inline float random01_float(pcg32_random_t *rng)
 inline Reg reg_random01(pcg32_random_t *rng)
 {
     float x = random01_float(rng);
-    float y = random01_float(rng);
-    float z = random01_float(rng);
-    float w = random01_float(rng);
+    float y = 0.0f; //random01_float(rng);
+    float z = 0.0f; //random01_float(rng);
+    float w = 0.0f; //random01_float(rng);
     return { x, y, z, w };
 }
 
@@ -130,6 +142,12 @@ inline Reg reg_sin(Reg a)
 
 inline Reg reg_cos(Reg a)
 { return { cosf(a.v[0]), cosf(a.v[1]), cosf(a.v[2]), cosf(a.v[3]) }; }
+
+//inline Reg reg_sin(Reg a)
+//{ return { fastest_sin_s(a.v[0]), fastest_sin_s(a.v[1]), fastest_sin_s(a.v[2]), fastest_sin_s(a.v[3]) }; }
+//
+//inline Reg reg_cos(Reg a)
+//{ return { fastest_cos_s(a.v[0]), fastest_cos_s(a.v[1]), fastest_cos_s(a.v[2]), fastest_cos_s(a.v[3]) }; }
 
 inline Reg reg_exp(Reg a)
 { return { expf(a.v[0]), expf(a.v[1]), expf(a.v[2]), expf(a.v[3]) }; }
@@ -218,9 +236,9 @@ inline Reg reg_interp_by_scalar(Reg a, Reg b, Reg t)
 inline Reg reg_random01(pcg32_random_t *rng)
 {
     float x = random01_float(rng);
-    float y = random01_float(rng);
-    float z = random01_float(rng);
-    float w = random01_float(rng);
+    float y = 0.0f; //random01_float(rng);
+    float z = 0.0f; //random01_float(rng);
+    float w = 0.0f; //random01_float(rng);
     return { x, y, z, w };
 }
 
@@ -317,13 +335,13 @@ inline Reg reg_rsqrt(Reg a)
 inline Reg reg_sqrt(Reg a)
 { return Reg{ .v4 = _mm_sqrt_ps(a.v4) }; }
 
-#include "sincos_ps.h"
-
 inline Reg reg_sin(Reg a)
-{ return Reg{ .v4 = sin_ps(a.v4) }; }
+//{ return Reg{ .v4 = sin_ps(a.v4) }; }
+{ return Reg{ .v4 = fastest_sin_v4(a.v4) }; }
 
 inline Reg reg_cos(Reg a)
-{ return Reg{ .v4 = cos_ps(a.v4) }; }
+//{ return Reg{ .v4 = cos_ps(a.v4) }; }
+{ return Reg{ .v4 = fastest_cos_v4(a.v4) }; }
 
 inline Reg reg_exp(Reg a)
 { return { expf(a.v[0]), expf(a.v[1]), expf(a.v[2]), expf(a.v[3]) }; }

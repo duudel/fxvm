@@ -924,12 +924,14 @@ Particle_System load_psys()
     result.stretch = true;
     result.emitter.life_max = 8.0f;
     result.emitter.loop = true;
-    result.emitter.rate = 400.0f;
+    result.emitter.rate = 800.0f;
     result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
     result.emitter.drag = 0.95;
     result.emitter.initial_position_bc = compile_emitter_expr(&result, SOURCE(
-        theta = random01 * 2.0 * PI * emitter_life * 5.0;
-        r = random01 * 1.1415; // * emitter_life;
+        Rx = rand01();
+        Ry = rand01();
+        theta = Rx * 2.0 * PI * emitter_life * 5.0;
+        r = Ry * 1.1415; // * emitter_life;
         sr = sqrt(r);
         sr * vec3(cos(theta), 0.0, sin(theta));
     ));
@@ -939,9 +941,12 @@ Particle_System load_psys()
     ));
 
     result.acceleration = compile_particle_expr(&result, SOURCE(
+        Rx = rand01();
+        Ry = rand01();
+        Rz = rand01();
         target = vec3(0, 5 * emitter_life, 0);
         v = target - particle_position;
-        v * 10.0 * emitter_life + vec3(random01 * 2.0 - 1.0, random01 * 2.0 - 1.0, random01 * 2.0 - 1.0) * 10.0 * emitter_life;
+        v * 10.0 * emitter_life + vec3(Rx * 2.0 - 1.0, Ry * 2.0 - 1.0, Rz * 2.0 - 1.0) * 10.0 * emitter_life;
     ));
     result.size = compile_particle_expr(&result, SOURCE(
         emitter_life * 0.08 + 0.08 + 0.02 * particle_random - 0.04 * particle_life;// + random01 * 0.018;
@@ -959,19 +964,25 @@ Particle_System create_psys2()
     result.stretch = true;
     result.emitter.life_max = 8.0f;
     result.emitter.loop = true;
-    result.emitter.rate = 400.0f;
+    result.emitter.rate = 800.0f;
     result.emitter.acceleration = vec3{0.0f, 5.5f, 0.0f};
     //result.emitter.drag = 0.95;
     result.emitter.initial_position_bc = compile_emitter_expr(&result, SOURCE(
-        theta = random01 * 2.0 * PI;
-        r = fract(random01 * 12771.2359);
+        Rx = rand01();
+        Ry = rand01();
+        theta = Rx * 2.0 * PI;
+        //r = fract(Ry * 12771.2359);
+        r = Ry;
         //sr = sqrt(r) * 2.0;
         sr = r * 2.0;
         vec3(sr * cos(theta), 0.0, sr * sin(theta));
     ));
     result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
     result.emitter.initial_velocity_bc = compile_emitter_expr(&result, SOURCE(
-        vec3(random01-0.5, 2, random01-0.5);
+        Rx = rand01();
+        Ry = rand01();
+        //vec3(R.x - 0.5, 2, R.y - 0.5);
+        vec3(Rx, 2, Ry) - vec3(0.5, 0, 0.5); // vec3(R.x - 0.5, 2, R.y - 0.5);
     ));
 
     /*result.acceleration = compile_particle_expr(&result, SOURCE(
@@ -985,7 +996,6 @@ Particle_System create_psys2()
     result.color = compile_particle_expr(&result, SOURCE(
         lerp(vec3(0.0, 0.0, 2.2), vec3(1.0, 1.0, 0.5), clamp01(particle_position.y * 0.5))
         + clamp01(particle_position.y) * vec3(0.2, 0.2, 0.2);
-        //vec3(0.2, 1, 0.2);
     ));
     return result;
 }
@@ -1203,11 +1213,13 @@ int main(int argc, char **argv)
         SwapBuffers((HDC)window.hdc);
     }
 
+    float avg_ticks_per_particle = sim_ticks_avg / avg_particles;
+
     sim_ticks_avg /= sim_count;
     avg_particles /= sim_count;
 
-    printf("avg\t smooth\t avg particles\n");
-    printf("%.0f\t %0.f\t %.3f\n", sim_ticks_avg, sim_ticks_smooth, avg_particles);
+    printf("avg\t smooth\t avg particle\t avg ticks per particle\n");
+    printf("%.0f\t %0.f\t %.3f\t %.3f\n", sim_ticks_avg, sim_ticks_smooth, avg_particles, avg_ticks_per_particle);
 
     wglMakeCurrent((HDC)window.hdc, nullptr);
     wglDeleteContext((HGLRC)window.glrc);

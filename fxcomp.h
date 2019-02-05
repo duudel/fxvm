@@ -1246,6 +1246,7 @@ enum FXVM_ILOp
     FXIL_CLAMP01,
     FXIL_CLAMP,
     FXIL_INTERP,
+    FXIL_RAND01,
 };
 
 struct FXVM_ILInstrInfo
@@ -1287,6 +1288,7 @@ FXVM_ILInstrInfo il_instr_info[] = {
     [FXIL_CLAMP01] =     {"FXIL_CLAMP01", 2},
     [FXIL_CLAMP] =       {"FXIL_CLAMP", 4},
     [FXIL_INTERP] =      {"FXIL_INTERP", 4},
+    [FXIL_RAND01] =      {"FXIL_RAND01", 1},
 };
 
 const char* il_op_to_string(FXVM_ILOp op)
@@ -1335,6 +1337,14 @@ void ensure_il_instr_fits(FXVM_ILContext *ctx)
         ctx->instructions = (FXVM_ILInstr*)realloc(ctx->instructions, new_cap * sizeof(FXVM_ILInstr));
         ctx->instr_cap = new_cap;
     }
+}
+
+void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg a)
+{
+    ensure_il_instr_fits(ctx);
+    int i = ctx->instr_num;
+    ctx->instructions[i] = FXVM_ILInstr { op, a, { } };
+    ctx->instr_num = i + 1;
 }
 
 void push_il(FXVM_ILContext *ctx, FXVM_ILOp op, FXIL_Reg a, FXIL_Reg b)
@@ -1696,6 +1706,14 @@ FXIL_Reg emit_lerp(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
     return result;
 }
 
+FXIL_Reg emit_rand01(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
+{
+    (void)compiler;
+    FXIL_Reg result = new_il_reg(ctx, call->type);
+    push_il(ctx, FXIL_RAND01, result);
+    return result;
+}
+
 FXIL_Reg emit_vec4(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_Ast *call)
 {
     FXIL_Reg result = new_il_reg(ctx, call->type);
@@ -1794,6 +1812,7 @@ FXIL_Reg generate_call_expr(FXVM_Compiler *compiler, FXVM_ILContext *ctx, FXVM_A
         {"clamp01", emit_clamp01},
         {"clamp", emit_clamp},
         {"lerp", emit_lerp},
+        {"rand01", emit_rand01},
     };
     const int builtin_num = sizeof(builtins) / sizeof(BuiltinInfo);
 
@@ -2244,6 +2263,12 @@ void write_instruction(FXVM_Codegen *gen, Registers *regs, FXVM_ILInstr *instr)
                 write_regs(gen, a_reg, b_reg);
             }
         } break;
+    case FXIL_RAND01:
+        {
+            int target_reg = allocate_register(gen, regs, instr->target);
+            write_op(gen, FXOP_RAND01);
+            write_regs(gen, target_reg);
+        } break;
     }
 }
 
@@ -2276,72 +2301,74 @@ void initialize_spans(FXVM_Compiler *compiler, Registers *regs)
         write_to(regs, instructions[i].target, i);
         switch (instructions[i].op)
         {
-            case FXIL_LOAD_CONST:
-            case FXIL_LOAD_INPUT:
-            case FXIL_LOAD_ATTRIB:
-                break;
-            case FXIL_SWIZZLE:
-                read_from(regs, instructions[i].swizzle.operand, i);
-                break;
-            case FXIL_MOV:
-                read_from(regs, instructions[i].read_operands[0], i);
-                break;
-            case FXIL_MOV_X:
-                read_from(regs, instructions[i].read_operands[0], i);
-                break;
-            case FXIL_MOV_XY:
-                read_from(regs, instructions[i].read_operands[0], i);
-                read_from(regs, instructions[i].read_operands[1], i);
-                break;
-            case FXIL_MOV_XYZ:
-                read_from(regs, instructions[i].read_operands[0], i);
-                read_from(regs, instructions[i].read_operands[1], i);
-                read_from(regs, instructions[i].read_operands[2], i);
-                break;
-            case FXIL_MOV_XYZW:
-                read_from(regs, instructions[i].read_operands[0], i);
-                read_from(regs, instructions[i].read_operands[1], i);
-                read_from(regs, instructions[i].read_operands[2], i);
-                read_from(regs, instructions[i].read_operands[3], i);
-                break;
-            case FXIL_NEG:
-            case FXIL_RCP:
-            case FXIL_RSQRT:
-            case FXIL_SQRT:
-            case FXIL_SIN:
-            case FXIL_COS:
-            case FXIL_EXP:
-            case FXIL_EXP2:
-            case FXIL_EXP10:
-            case FXIL_TRUNC:
-            case FXIL_FRACT:
-            case FXIL_ABS:
-                read_from(regs, instructions[i].read_operands[0], i);
-                break;
-            case FXIL_ADD:
-            case FXIL_SUB:
-            case FXIL_MUL:
-            case FXIL_DIV:
-            case FXIL_MIN:
-            case FXIL_MAX:
-            case FXIL_DOT:
-                read_from(regs, instructions[i].read_operands[0], i);
-                read_from(regs, instructions[i].read_operands[1], i);
-                break;
-            case FXIL_NORMALIZE:
-            case FXIL_CLAMP01:
-                read_from(regs, instructions[i].read_operands[0], i);
-                break;
-            case FXIL_CLAMP:
-                read_from(regs, instructions[i].read_operands[0], i);
-                read_from(regs, instructions[i].read_operands[1], i);
-                read_from(regs, instructions[i].read_operands[2], i);
-                break;
-            case FXIL_INTERP:
-                read_from(regs, instructions[i].read_operands[0], i);
-                read_from(regs, instructions[i].read_operands[1], i);
-                read_from(regs, instructions[i].read_operands[2], i);
-                break;
+        case FXIL_LOAD_CONST:
+        case FXIL_LOAD_INPUT:
+        case FXIL_LOAD_ATTRIB:
+            break;
+        case FXIL_SWIZZLE:
+            read_from(regs, instructions[i].swizzle.operand, i);
+            break;
+        case FXIL_MOV:
+            read_from(regs, instructions[i].read_operands[0], i);
+            break;
+        case FXIL_MOV_X:
+            read_from(regs, instructions[i].read_operands[0], i);
+            break;
+        case FXIL_MOV_XY:
+            read_from(regs, instructions[i].read_operands[0], i);
+            read_from(regs, instructions[i].read_operands[1], i);
+            break;
+        case FXIL_MOV_XYZ:
+            read_from(regs, instructions[i].read_operands[0], i);
+            read_from(regs, instructions[i].read_operands[1], i);
+            read_from(regs, instructions[i].read_operands[2], i);
+            break;
+        case FXIL_MOV_XYZW:
+            read_from(regs, instructions[i].read_operands[0], i);
+            read_from(regs, instructions[i].read_operands[1], i);
+            read_from(regs, instructions[i].read_operands[2], i);
+            read_from(regs, instructions[i].read_operands[3], i);
+            break;
+        case FXIL_NEG:
+        case FXIL_RCP:
+        case FXIL_RSQRT:
+        case FXIL_SQRT:
+        case FXIL_SIN:
+        case FXIL_COS:
+        case FXIL_EXP:
+        case FXIL_EXP2:
+        case FXIL_EXP10:
+        case FXIL_TRUNC:
+        case FXIL_FRACT:
+        case FXIL_ABS:
+            read_from(regs, instructions[i].read_operands[0], i);
+            break;
+        case FXIL_ADD:
+        case FXIL_SUB:
+        case FXIL_MUL:
+        case FXIL_DIV:
+        case FXIL_MIN:
+        case FXIL_MAX:
+        case FXIL_DOT:
+            read_from(regs, instructions[i].read_operands[0], i);
+            read_from(regs, instructions[i].read_operands[1], i);
+            break;
+        case FXIL_NORMALIZE:
+        case FXIL_CLAMP01:
+            read_from(regs, instructions[i].read_operands[0], i);
+            break;
+        case FXIL_CLAMP:
+            read_from(regs, instructions[i].read_operands[0], i);
+            read_from(regs, instructions[i].read_operands[1], i);
+            read_from(regs, instructions[i].read_operands[2], i);
+            break;
+        case FXIL_INTERP:
+            read_from(regs, instructions[i].read_operands[0], i);
+            read_from(regs, instructions[i].read_operands[1], i);
+            read_from(regs, instructions[i].read_operands[2], i);
+            break;
+        case FXIL_RAND01:
+            break;
         }
     }
 #ifdef DEBUG_REG_ALLOCATOR
@@ -2517,6 +2544,8 @@ bool compile(FXVM_Compiler *compiler, const char *source, const char *source_end
     set_function_parameter_type(compiler, lerp_i, 0, FXTYP_GENF);
     set_function_parameter_type(compiler, lerp_i, 1, FXTYP_GENF);
     set_function_parameter_type(compiler, lerp_i, 2, FXTYP_F1);
+
+    /*int rand01_i =*/ register_builtin_function(compiler, "rand01", FXTYP_F1, 0);
 
     bool result =
         tokenize(compiler, source, source_end) &&
