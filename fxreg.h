@@ -1,6 +1,6 @@
 #ifndef FXVM_REG
 
-//#define USE_SSE
+#define USE_SSE
 
 #ifdef USE_SSE
 #include <intrin.h>
@@ -137,17 +137,17 @@ inline Reg reg_rsqrt(Reg a)
 inline Reg reg_sqrt(Reg a)
 { return { sqrtf(a.v[0]), sqrtf(a.v[1]), sqrtf(a.v[2]), sqrtf(a.v[3]) }; }
 
-inline Reg reg_sin(Reg a)
-{ return { sinf(a.v[0]), sinf(a.v[1]), sinf(a.v[2]), sinf(a.v[3]) }; }
-
-inline Reg reg_cos(Reg a)
-{ return { cosf(a.v[0]), cosf(a.v[1]), cosf(a.v[2]), cosf(a.v[3]) }; }
-
 //inline Reg reg_sin(Reg a)
-//{ return { fastest_sin_s(a.v[0]), fastest_sin_s(a.v[1]), fastest_sin_s(a.v[2]), fastest_sin_s(a.v[3]) }; }
+//{ return { sinf(a.v[0]), sinf(a.v[1]), sinf(a.v[2]), sinf(a.v[3]) }; }
 //
 //inline Reg reg_cos(Reg a)
-//{ return { fastest_cos_s(a.v[0]), fastest_cos_s(a.v[1]), fastest_cos_s(a.v[2]), fastest_cos_s(a.v[3]) }; }
+//{ return { cosf(a.v[0]), cosf(a.v[1]), cosf(a.v[2]), cosf(a.v[3]) }; }
+
+inline Reg reg_sin(Reg a)
+{ return { fastest_sin_s(a.v[0]), fastest_sin_s(a.v[1]), fastest_sin_s(a.v[2]), fastest_sin_s(a.v[3]) }; }
+
+inline Reg reg_cos(Reg a)
+{ return { fastest_cos_s(a.v[0]), fastest_cos_s(a.v[1]), fastest_cos_s(a.v[2]), fastest_cos_s(a.v[3]) }; }
 
 inline Reg reg_exp(Reg a)
 { return { expf(a.v[0]), expf(a.v[1]), expf(a.v[2]), expf(a.v[3]) }; }

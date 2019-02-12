@@ -3,24 +3,44 @@
 #include "fxreg.h"
 #include "fxop.h"
 
-/*
- * b1   | b2
- * w OP | s  t
- *
- * OP opcode (6 bits)
- * w  width: 1, 2, 3 or 4 components (2 bits)
- * s  source: which register is the source (4 bits)
- * t  target: which register is the target (4 bits)
-*/
-
 struct FXVM_Bytecode
 {
     int len;
     void *code;
 };
 
+struct FXVM_AttributeBindings
+{
+    enum { MAX_ATTRIBUTES = 16 };
+
+    const void *attr_ptr[MAX_ATTRIBUTES];
+    int attr_stride[MAX_ATTRIBUTES];
+};
+
+struct FXVM_Program
+{
+    enum { MAX_UNIFORM_SLOTS = 16 };
+
+    float uniform_slots[MAX_UNIFORM_SLOTS];
+
+    FXVM_Bytecode bytecode;
+};
+
+#include "fxvm_types.h"
+// Does not make a copy of the data passed in. The data must be valid, for as long as the bindings object is active.
+void bind_attribute(FXVM_AttributeBindings *bindings, int attribute_index, FXVM_Type type, int stride_bytes, const void *data);
+// Copies the data to internal storage.
+void set_uniform(FXVM_Program *program, int uniform_location, FXVM_Type type, const float *data);
+void set_uniform_f1(FXVM_Program *program, int uniform_location, const float *data);
+void set_uniform_f2(FXVM_Program *program, int uniform_location, const float *data);
+void set_uniform_f3(FXVM_Program *program, int uniform_location, const float *data);
+void set_uniform_f4(FXVM_Program *program, int uniform_location, const float *data);
+
+FXVM_Program fxvm_program_new(FXVM_Bytecode bytecode);
+
 struct FXVM_Machine
 {
+    FXVM_AttributeBindings *bindings;
     pcg32_random_t rng;
 };
 
@@ -32,19 +52,71 @@ struct FXVM_State
     Reg r[MAX_REGS];
 };
 
-void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode);
+void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance_attributes, int *attribute_stride, int instance_index, FXVM_Bytecode *bytecode);
 
 template <int MAX_GROUP>
-void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attributes, int instance_index, int instance_count, FXVM_Bytecode *bytecode);
+void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attributes, int *attribute_stride, int instance_index, int instance_count, FXVM_Bytecode *bytecode);
+
+void exec(FXVM_Machine *vm, FXVM_State &S, int instance_index, FXVM_Program *program);
+
+template <int MAX_GROUP>
+void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], int instance_index, int instance_count, FXVM_Program *program);
 
 void disassemble(FXVM_Bytecode *bytecode);
 
 #ifdef FXVM_IMPL
 
+void exec(FXVM_Machine *vm, FXVM_State &S, int instance_index, FXVM_Program *program)
+{
+    exec(vm, S, program->uniform_slots, (float**)vm->bindings->attr_ptr, vm->bindings->attr_stride, instance_index, &program->bytecode);
+}
+
+template <int MAX_GROUP>
+void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], int instance_index, int instance_count, FXVM_Program *program)
+{
+    exec<MAX_GROUP>(vm, S, program->uniform_slots, (float**)vm->bindings->attr_ptr, vm->bindings->attr_stride, instance_index, instance_count, &program->bytecode);
+}
+
+
 FXVM_Machine fxvm_new()
 {
     FXVM_Machine result = { };
     result.rng = PCG32_INITIALIZER;
+    return result;
+}
+
+void bind_attribute(FXVM_AttributeBindings *bindings, int attribute_index, FXVM_Type type, int stride_bytes, const void *data)
+{
+    // assert type is one of [F1, F2, F3, F4]
+    // assert attribute_index < MAX_ATTRIBUTES
+    (void)type;
+    bindings->attr_stride[attribute_index] = stride_bytes;
+    bindings->attr_ptr[attribute_index] = data;
+}
+
+void set_uniform(FXVM_Program *program, int uniform_location, FXVM_Type type, const float *data)
+{
+    // assert type is one of [F1, F2, F3, F4]
+    // assert uniform_location + (int)type < MAX_UNIFORM_SLOTS
+    memcpy(&program->uniform_slots[uniform_location], data, (int)type * sizeof(float));
+}
+
+void set_uniform_f1(FXVM_Program *program, int uniform_location, const float *data)
+{ set_uniform(program, uniform_location, FXTYP_F1, data); }
+
+void set_uniform_f2(FXVM_Program *program, int uniform_location, const float *data)
+{ set_uniform(program, uniform_location, FXTYP_F2, data); }
+
+void set_uniform_f3(FXVM_Program *program, int uniform_location, const float *data)
+{ set_uniform(program, uniform_location, FXTYP_F3, data); }
+
+void set_uniform_f4(FXVM_Program *program, int uniform_location, const float *data)
+{ set_uniform(program, uniform_location, FXTYP_F4, data); }
+
+FXVM_Program fxvm_program_new(FXVM_Bytecode bytecode)
+{
+    FXVM_Program result = { };
+    result.bytecode = bytecode;
     return result;
 }
 
@@ -60,7 +132,17 @@ FXVM_Machine fxvm_new()
 #define FXVM_TRACE_REG(i)
 #endif
 
-void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance_attributes, int instance_index, FXVM_Bytecode *bytecode)
+/*
+ * b1   | b2
+ * w OP | s  t
+ *
+ * OP opcode (6 bits)
+ * w  width: 1, 2, 3 or 4 components (2 bits)
+ * s  source: which register is the source (4 bits)
+ * t  target: which register is the target (4 bits)
+*/
+
+void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance_attributes, int *attribute_stride, int instance_index, FXVM_Bytecode *bytecode)
 {
     const uint8_t *end = (uint8_t*)bytecode->code + bytecode->len;
     const uint8_t *p = (uint8_t*)bytecode->code;
@@ -95,16 +177,19 @@ void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance
             } break;
         case FXOP_LOAD_ATTRIBUTE:
             {
-                uint8_t width = p[0] >> 6;
-                if (width == 3) width = 4;
+                //uint8_t width = p[0] >> 6;
+                //if (width == 3) width = 4;
                 uint8_t target_reg = p[1] & 0xf;
                 uint8_t input_attribute = p[2];
-                float *attribute_data = instance_attributes[input_attribute];
-                S.r[target_reg] = reg_load((uint8_t*)(attribute_data + instance_index * width));
+                //float *attribute_data = instance_attributes[input_attribute];
+                uint8_t *attribute_data = (uint8_t*)instance_attributes[input_attribute];
+                int stride = attribute_stride[input_attribute];
+                S.r[target_reg] = reg_load(attribute_data + instance_index * stride);
+                //S.r[target_reg] = reg_load((uint8_t*)(attribute_data + instance_index * width));
                 p += 3;
 
                 FXVM_TRACE_OP();
-                FXVM_TRACE("%d r%d <- [%d][%d]: ", width, target_reg, instance_index, input_attribute);
+                FXVM_TRACE("r%d <- [%d][%d]: ", target_reg, instance_index, input_attribute);
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;
@@ -562,8 +647,20 @@ void exec(FXVM_Machine *vm, FXVM_State &S, float *global_input, float **instance
     }
 }
 
+#undef FXVM_TRACE_REG
+
+#ifdef TRACE_FXVM
+#define FXVM_TRACE_OP() printf("%-18s ", fxvm_opcode_string[opcode] + 5)
+#define FXVM_TRACE(fmt, ...) printf(fmt, ## __VA_ARGS__)
+#define FXVM_TRACE_REG(i) printf("r%d={%.3f, %.3f, %.3f, %.3f}", i, S[0].r[i].v[0], S[0].r[i].v[1], S[0].r[i].v[2], S[0].r[i].v[3])
+#else
+#define FXVM_TRACE_OP()
+#define FXVM_TRACE(fmt, ...)
+#define FXVM_TRACE_REG(i)
+#endif
+
 template <int MAX_GROUP>
-void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attributes, int instance_index, int instance_count, FXVM_Bytecode *bytecode)
+void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, float **instance_attributes, int *attribute_stride, int instance_index, int instance_count, FXVM_Bytecode *bytecode)
 {
     const uint8_t *end = (uint8_t*)bytecode->code + bytecode->len;
     const uint8_t *p = (uint8_t*)bytecode->code;
@@ -604,19 +701,22 @@ void exec(FXVM_Machine *vm, FXVM_State (&S)[MAX_GROUP], float *global_input, flo
             } break;
         case FXOP_LOAD_ATTRIBUTE:
             {
-                uint8_t width = p[0] >> 6;
-                if (width == 3) width = 4;
+                //uint8_t width = p[0] >> 6;
+                //if (width == 3) width = 4;
                 uint8_t target_reg = p[1] & 0xf;
                 uint8_t input_attribute = p[2];
-                float *attribute_data = instance_attributes[input_attribute];
+                //float *attribute_data = instance_attributes[input_attribute];
+                uint8_t *attribute_data = (uint8_t*)instance_attributes[input_attribute];
+                int stride = attribute_stride[input_attribute];
                 for (int i = 0; i < instance_count; i++)
                 {
-                    S[i].r[target_reg] = reg_load((uint8_t*)(attribute_data + (instance_index + i)  * width));
+                    S[i].r[target_reg] = reg_load(attribute_data + (instance_index + i)  * stride);
+                    //S[i].r[target_reg] = reg_load((uint8_t*)(attribute_data + (instance_index + i)  * width));
                 }
                 p += 3;
 
                 FXVM_TRACE_OP();
-                FXVM_TRACE("%d r%d <- [%d][%d]: ", width, target_reg, instance_index, input_attribute);
+                FXVM_TRACE("r%d <- [%d][%d]: ", target_reg, instance_index, input_attribute);
                 FXVM_TRACE_REG(target_reg);
                 FXVM_TRACE("\n");
             } break;
@@ -1549,6 +1649,10 @@ void disassemble(FXVM_Bytecode *bytecode)
         }
     }
 }
+
+#undef FXVM_TRACE_OP
+#undef FXVM_TRACE
+#undef FXVM_TRACE_REG
 
 #endif
 
