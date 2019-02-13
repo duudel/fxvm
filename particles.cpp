@@ -591,7 +591,6 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
         if (PS->emitter.loop) E->life = PS->emitter.life_max;
     }
 
-#if 1
     int index = E->particles_alive;
     while (num_to_emit > 0 && index < Particles::MAX)
     {
@@ -603,7 +602,12 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
         //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
         P->acceleration[index] = PS->emitter.acceleration;//vec3{0.0f, -1.0f, 0.0f};
 
-        float initial_life = PS->emitter.initial_life + random01();
+        float initial_life = PS->emitter.initial_life; // + random01();
+        if (PS->emitter.initial_life_p.bytecode.code)
+        {
+            initial_life = eval_f1(vm, 0, &PS->emitter.initial_life_p);
+        }
+
         P->life_seconds[index] = initial_life;
         P->life_max[index] = initial_life;
         P->life_01[index] = 0.0f;
@@ -615,40 +619,6 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
         index++;
     }
     E->particles_alive = index;
-
-#else
-    int last_i = E->last_index;
-    int i = last_i + 1;
-    int search = 0;
-    while (search < Particles::MAX && num_to_emit > 0)
-    {
-        int index = i % Particles::MAX;
-        if (P->life_seconds[index] <= 0.0f)
-        {
-            global_input[PS->emitter.random_i] = random01();
-            //P->position[index] = vec3{0.0f, 0.0f, 0.0f};
-            P->position[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_position_bc) + E->position;
-            P->velocity[index] = eval_f3(global_input, nullptr, 0, PS->emitter.initial_velocity_bc);
-            //fflush(stdout);exit(0);
-            //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
-            P->acceleration[index] = PS->emitter.acceleration;//vec3{0.0f, -1.0f, 0.0f};
-
-            float initial_life = PS->emitter.initial_life + random01();
-            P->life_seconds[index] = initial_life;
-            P->life_max[index] = initial_life;
-            P->life_01[index] = 0.0f;
-            P->size[index] = 0.01f;
-            P->color[index] = vec3{1.0f, 1.0f, 1.0f};
-            P->random[index] = vec4{random01(), random01(), random01(), random01()};
-
-            num_to_emit--;
-        }
-        i++;
-        search++;
-        last_i = index;
-    }
-    E->last_index = last_i;
-#endif
 }
 
 template <class T>
@@ -987,6 +957,7 @@ Particle_System load_psys()
     result.emitter.life_max = 8.0f;
     result.emitter.loop = true;
     result.emitter.rate = 800.0f;
+    result.emitter.initial_life = 2.0f;
     result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
     result.emitter.drag = 0.95;
     result.emitter.initial_position_p = compile_emitter_expr(&result, SOURCE(
@@ -1027,6 +998,7 @@ Particle_System create_psys2()
     result.emitter.life_max = 8.0f;
     result.emitter.loop = true;
     result.emitter.rate = 800.0f;
+    result.emitter.initial_life = 2.0f;
     result.emitter.acceleration = vec3{0.0f, 5.5f, 0.0f};
     //result.emitter.drag = 0.95;
     result.emitter.initial_position_p = compile_emitter_expr(&result, SOURCE(
@@ -1078,6 +1050,10 @@ Particle_System create_psys3()
     result.emitter.life_max = 8.0f;
     result.emitter.loop = true;
     result.emitter.rate = 800.0f;
+    result.emitter.initial_life = 2.0f;
+    result.emitter.initial_life_p = compile_emitter_expr(&result, SOURCE(
+        1.0 + rand01()*0.5;
+    ));
     result.emitter.acceleration = vec3{0.0f, 5.5f, 0.0f};
     //result.emitter.drag = 0.95;
     result.emitter.initial_position_p = compile_emitter_expr(&result, SOURCE(
@@ -1093,14 +1069,12 @@ Particle_System create_psys3()
         Rx = rand01();
         Ry = rand01();
         //vec3(R.x - 0.5, 2, R.y - 0.5);
-        vec3(Rx, 2, Ry) - vec3(0.5, 0, 0.5); // vec3(R.x - 0.5, 2, R.y - 0.5);
+        vec3(Rx, 4, Ry) - vec3(0.5, 0, 0.5); // vec3(R.x - 0.5, 2, R.y - 0.5);
     ));
 
     result.acceleration = compile_particle_expr(&result, SOURCE(
         p = particle_position;
-        cs = cos(p * PI);
-        sn = sin(p * PI * 2);
-        wind = cs * sn + cs * cs;
+        wind = cos(p) * 0.4 + vec3(0, 0.8, 0);
         //wind = vec3(cos(emitter_life*PI), 0, sin(emitter_life*PI));
     ));
     result.size = compile_particle_expr(&result, SOURCE(
@@ -1108,8 +1082,8 @@ Particle_System create_psys3()
         0.4 + t * 1.2;
     ));
     result.color = compile_particle_expr(&result, SOURCE(
-        c0 = lerp(vec4(0.2, 0.2, 2.2, 1.0), vec4(0.2, 0.2, 0.2, 1.0), clamp01(particle_position.y * 0.5));
-        t0 = 2 * clamp01(particle_life) - 1;
+        c0 = lerp(vec4(1.0, 0.8, 0.6, 1.0), vec4(0.2, 0.2, 0.2, 1.0), clamp01(particle_position.y * 0.25));
+        t0 = clamp01(2 * particle_life - 1);
         t = t0 * t0;
         lerp(c0, vec4(0, 0, 0, 0), t);
         //+ clamp01(particle_position.y) * vec3(0.2, 0.2, 0.2);
@@ -1214,7 +1188,7 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
     // s  eeeeeeee xxxxxxx
     // s  eeeeee   xxxxxxx
     uint32_t depth = depth_u ^ 0xfffff000;
-    depth = (depth & 0x80000000) | ((depth & 0x3ffff000) << 2);
+    //depth = (depth & 0x80000000) | ((depth & 0x3ffff000) << 2);
     depth &= 0xffff0000;
 
     buffer->sort_key[bi] = (uint32_t)depth | (uint32_t)bi;
@@ -1299,7 +1273,6 @@ void draw_particle_buffer(Particle_DrawBuffer *buffer, Camera camera, int width,
     {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        //glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR);
         //glDisable(GL_BLEND);
     }
 
@@ -1416,12 +1389,11 @@ void draw(Camera camera, int width, int height, Particle_System *PS, Emitter_Ins
     glMatrixMode(GL_PROJECTION);
     glLoadMatrixf(camera_proj.m);
 
-    //mat4 identity = mat4{ 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };
     mat4 view_mat = camera_matrix(camera);
     vec3 right = {view_mat[0], view_mat[1], view_mat[2]};
     vec3 up = {view_mat[4], view_mat[5], view_mat[6]};
     vec3 look = {view_mat[8], view_mat[9], view_mat[10]};
-    //vec3 cam_pos = {view_mat[3], view_mat[7], view_mat[11]};
+
     view_mat = transpose(view_mat);
     glMatrixMode(GL_MODELVIEW);
     glLoadMatrixf(view_mat.m);
@@ -1442,13 +1414,9 @@ void draw(Camera camera, int width, int height, Particle_System *PS, Emitter_Ins
     glEnable(GL_TEXTURE_2D);
 
     glBegin(GL_TRIANGLES);
-    //for (int i = 0; i < Particles::MAX; i++)
     for (int i = 0; i < E->particles_alive; i++)
     {
-        //if (P->life_seconds[i] > 0.0f)
-        //{
-            draw_particle(P, i, right, up, look, PS->stretch);
-        //}
+        draw_particle(P, i, right, up, look, PS->stretch);
     }
     glEnd();
 
@@ -1480,7 +1448,7 @@ int main(int argc, char **argv)
     Window window = { };
     create_window(1000, 800, &window);
 
-    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+    glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
 
     /*
     uint8_t tex_data[64] = {
@@ -1517,14 +1485,14 @@ int main(int argc, char **argv)
     //};
 
     uint8_t tex_data[128] = {
-        255,  0, 255,  1, 255,   1, 255,   4, 255,  32, 255,   2, 255,  1, 255,  0,
-        255,  1, 255,  8, 255,   8, 255,  16, 255,  64, 255,  16, 255,  8, 255,  1,
-        255,  1, 255,  8, 255,   8, 255,  32, 255, 128, 255,  32, 255, 16, 255,  2,
-        255,  4, 255, 16, 255,  32, 255, 190, 255, 192, 255, 128, 255, 64, 255, 32,
-        255, 32, 255, 64, 255, 128, 255, 192, 255, 190, 255,  32, 255, 16, 255,  4,
-        255,  2, 255, 16, 255,  32, 255, 128, 255,  32, 255,   8, 255,  8, 255,  1,
-        255,  1, 255,  8, 255,  16, 255,  64, 255,  16, 255,   8, 255,  8, 255,  1,
-        255,  0, 255,  1, 255,   2, 255,  32, 255,   4, 255,   1, 255,  1, 255,  0,
+        255,  2, 255,  4, 255,   8, 255,  16, 255,  16, 255,   8, 255,  4, 255,  2,
+        255,  4, 255,  8, 255,  16, 255,  32, 255,  32, 255,  16, 255,  8, 255,  4,
+        255,  8, 255, 16, 255,  16, 255,  64, 255, 128, 255,  32, 255, 16, 255,  8,
+        255, 16, 255, 32, 255,  64, 255, 190, 255, 192, 255, 128, 255, 32, 255, 16,
+        255, 16, 255, 32, 255, 128, 255, 192, 255, 190, 255,  64, 255, 32, 255, 16,
+        255,  8, 255, 16, 255,  32, 255, 128, 255,  64, 255,  16, 255, 16, 255,  8,
+        255,  4, 255,  8, 255,  16, 255,  32, 255,  32, 255,  16, 255,  8, 255,  4,
+        255,  2, 255,  4, 255,   8, 255,  16, 255,  16, 255,   8, 255,  4, 255,  2,
     };
 
     glGenerateMipmap = (void (*)(GLenum))(void*)wglGetProcAddress("glGenerateMipmap");
