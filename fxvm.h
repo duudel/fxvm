@@ -1643,6 +1643,14 @@ void disassemble(FXVM_Bytecode *bytecode)
                 FXVM_PRINT_OP();
                 FXVM_PRINT("r%d <- r%d r%d r%d\n", target_reg, t_reg, a_reg, b_reg);
             } break;
+        case FXOP_RAND01:
+            {
+                uint8_t target_reg = p[1] & 0xf;
+                p += 2;
+
+                FXVM_PRINT_OP();
+                FXVM_PRINT("r%d\n", target_reg);
+            } break;
         default:
             printf("ERROR: invalid opcode %d\n", opcode); fflush(stdout);
             return;
