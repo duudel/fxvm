@@ -1,0 +1,12 @@
+
+drag = 0
+
+initial_velocity = vec3(0, 10, 0)
+initial_velocity = {{
+    vec3(2, 1, 2) * vec3(rand01(), 5, rand01()) - vec3(1, 0, 1);
+}}
+
+color = vec4(1, 0, 1, 1)
+
+size = 0.2
+
