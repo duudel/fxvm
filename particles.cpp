@@ -449,11 +449,11 @@ struct Emitter_Parameters
     float initial_life;
     FXVM_Program initial_life_p;
 
-    vec3 initial_velocity;
-    FXVM_Program initial_velocity_p;
-
     vec3 initial_position;
     FXVM_Program initial_position_p;
+
+    vec3 initial_velocity;
+    FXVM_Program initial_velocity_p;
 
     float drag;
     FXVM_Program drag_p;
@@ -468,9 +468,14 @@ struct Particle_System
     bool stretch;
     bool additive;
 
-    FXVM_Program color;
-    FXVM_Program size;
-    FXVM_Program acceleration;
+    vec3 acceleration;
+    FXVM_Program acceleration_p;
+
+    vec4 color;
+    FXVM_Program color_p;
+
+    float size;
+    FXVM_Program size_p;
 
     int attrib_life;
     int attrib_position;
@@ -596,8 +601,18 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
     {
         //P->position[index] = eval_f3(vm, global_input, nullptr, 0, PS->emitter.initial_position_p) + E->position;
         //P->velocity[index] = eval_f3(vm, global_input, nullptr, 0, PS->emitter.initial_velocity_p);
-        P->position[index] = eval_f3(vm, 0, &PS->emitter.initial_position_p) + E->position;
-        P->velocity[index] = eval_f3(vm, 0, &PS->emitter.initial_velocity_p);
+        vec3 position = E->position + PS->emitter.initial_position;
+        if (PS->emitter.initial_position_p.bytecode.code)
+        {
+            position = position + eval_f3(vm, 0, &PS->emitter.initial_position_p);
+        }
+        P->position[index] = position;
+
+        P->velocity[index] = PS->emitter.initial_velocity;
+        if (PS->emitter.initial_velocity_p.bytecode.code)
+        {
+            P->velocity[index] = eval_f3(vm, 0, &PS->emitter.initial_velocity_p);
+        }
         //fflush(stdout);exit(0);
         //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
         P->acceleration[index] = PS->emitter.acceleration;//vec3{0.0f, -1.0f, 0.0f};
@@ -611,8 +626,8 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
         P->life_seconds[index] = initial_life;
         P->life_max[index] = initial_life;
         P->life_01[index] = 0.0f;
-        P->size[index] = 0.01f;
-        P->color[index] = vec4{1.0f, 1.0f, 1.0f, 1.0f};
+        P->size[index] = PS->size;
+        P->color[index] = PS->color; //vec4{1.0f, 1.0f, 1.0f, 1.0f};
         P->random[index] = vec4{random01(), random01(), random01(), random01()};
 
         num_to_emit--;
@@ -741,21 +756,21 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
 
     vm->bindings = &attr_bindings;
 
-    if (PS->acceleration.bytecode.code)
+    if (PS->acceleration_p.bytecode.code)
     {
-        set_uniform_f1(&PS->acceleration, PS->emitter_life_i, &emitter_life);
+        set_uniform_f1(&PS->acceleration_p, PS->emitter_life_i, &emitter_life);
         const int group_size = 16;
         int i = 0;
         for (; i + group_size - 1 < E->particles_alive; i += group_size)
         {
             //eval_f3<16>(vm, &P->acceleration[i], global_input, attributes, i, group_size, PS->acceleration);
-            eval_f3<16>(vm, &P->acceleration[i], i, group_size, &PS->acceleration);
+            eval_f3<16>(vm, &P->acceleration[i], i, group_size, &PS->acceleration_p);
         }
         if (i < E->particles_alive)
         {
             int last_group = E->particles_alive - i;
             //eval_f3<16>(vm, &P->acceleration[i], global_input, attributes, i, last_group, PS->acceleration);
-            eval_f3<16>(vm, &P->acceleration[i], i, last_group, &PS->acceleration);
+            eval_f3<16>(vm, &P->acceleration[i], i, last_group, &PS->acceleration_p);
         }
     }
 
@@ -768,7 +783,7 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
         P->life_01[i] = 1.0f - life_seconds * (1.0f / P->life_max[i]);
 
         vec3 acceleration = PS->emitter.acceleration;
-        if (PS->acceleration.bytecode.code) acceleration = P->acceleration[i];
+        if (PS->acceleration_p.bytecode.code) acceleration = P->acceleration[i];
 
         vec3 vel = P->velocity[i];
         float v2 = -dot(vel, vel);
@@ -783,33 +798,33 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
         P->velocity[i] = velocity;
         P->position[i] = position;
     }
-    if (PS->size.bytecode.code)
+    if (PS->size_p.bytecode.code)
     {
-        set_uniform_f1(&PS->size, PS->emitter_life_i, &emitter_life);
+        set_uniform_f1(&PS->size_p, PS->emitter_life_i, &emitter_life);
         const int group_size = 16;
         int i = 0;
         for (; i + group_size - 1 < E->particles_alive; i += group_size)
         {
             //eval_f1<16>(vm, &P->size[i], global_input, attributes, i, group_size, PS->size);
-            eval_f1<16>(vm, &P->size[i], i, group_size, &PS->size);
+            eval_f1<16>(vm, &P->size[i], i, group_size, &PS->size_p);
         }
         if (i < E->particles_alive)
         {
             int last_group = E->particles_alive - i;
             //eval_f1<16>(vm, &P->size[i], global_input, attributes, i, last_group, PS->size);
-            eval_f1<16>(vm, &P->size[i], i, last_group, &PS->size);
+            eval_f1<16>(vm, &P->size[i], i, last_group, &PS->size_p);
         }
     }
-    if (PS->color.bytecode.code)
+    if (PS->color_p.bytecode.code)
     {
-        set_uniform_f1(&PS->color, PS->emitter_life_i, &emitter_life);
+        set_uniform_f1(&PS->color_p, PS->emitter_life_i, &emitter_life);
         const int group_size = 16;
         int i = 0;
         for (; i + group_size - 1 < E->particles_alive; i += group_size)
         {
             //printf("-- color:\n");
             //eval_f3<16>(vm, &P->color[i], global_input, attributes, i, group_size, PS->color);
-            eval_f4<16>(vm, &P->color[i], i, group_size, &PS->color);
+            eval_f4<16>(vm, &P->color[i], i, group_size, &PS->color_p);
             //if (P->life_01[i] > 0.5f) exit(0);
             //printf("--\n");
         }
@@ -817,7 +832,7 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
         {
             int last_group = E->particles_alive - i;
             //eval_f3<16>(vm, &P->color[i], global_input, attributes, i, last_group, PS->color);
-            eval_f4<16>(vm, &P->color[i], i, last_group, &PS->color);
+            eval_f4<16>(vm, &P->color[i], i, last_group, &PS->color_p);
         }
     }
 #else
@@ -900,7 +915,7 @@ mat4 camera_matrix(Camera camera)
 
 void report_compile_error(const char *err) { printf("Error: %s\n", err); }
 
-FXVM_Program compile_particle_expr(Particle_System *PS, const char *source)
+FXVM_Program compile_particle_expr(Particle_System *PS, const char *source, int source_len)
 {
     FXVM_Compiler compiler = { };
     compiler.report_error = report_compile_error;
@@ -914,7 +929,7 @@ FXVM_Program compile_particle_expr(Particle_System *PS, const char *source)
     PS->attrib_acceleration = register_attribute(&compiler, "particle_acceleration", FXTYP_F3);
     PS->attrib_particle_random = register_attribute(&compiler, "particle_random", FXTYP_F1);
 
-    compile(&compiler, source, source + strlen(source));
+    compile(&compiler, source, source + source_len);
     FXVM_Bytecode bytecode = { compiler.codegen.buffer_len, compiler.codegen.buffer };
 #if 1
     printf("----\n");
@@ -927,7 +942,12 @@ FXVM_Program compile_particle_expr(Particle_System *PS, const char *source)
     return result;
 }
 
-FXVM_Program compile_emitter_expr(Particle_System *PS, const char *source)
+FXVM_Program compile_particle_expr(Particle_System *PS, const char *source)
+{
+    return compile_particle_expr(PS, source, strlen(source));
+}
+
+FXVM_Program compile_emitter_expr(Particle_System *PS, const char *source, int source_len)
 {
     FXVM_Compiler compiler = { };
     compiler.report_error = report_compile_error;
@@ -935,7 +955,7 @@ FXVM_Program compile_emitter_expr(Particle_System *PS, const char *source)
     PS->emitter.life_i = register_global_input_variable(&compiler, "emitter_life", FXTYP_F1);
     PS->emitter.random_i = register_global_input_variable(&compiler, "random01", FXTYP_F1);
 
-    compile(&compiler, source, source + strlen(source));
+    compile(&compiler, source, source + source_len);
     FXVM_Bytecode bytecode = { compiler.codegen.buffer_len, compiler.codegen.buffer };
 #if 0
     printf("----\n");
@@ -946,6 +966,11 @@ FXVM_Program compile_emitter_expr(Particle_System *PS, const char *source)
 #endif
     FXVM_Program result = fxvm_program_new(bytecode);
     return result;
+}
+
+FXVM_Program compile_emitter_expr(Particle_System *PS, const char *source)
+{
+    return compile_emitter_expr(PS, source, strlen(source));
 }
 
 #define SOURCE(x) #x
@@ -959,35 +984,37 @@ Particle_System load_psys()
     result.emitter.rate = 800.0f;
     result.emitter.initial_life = 2.0f;
     result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
-    result.emitter.drag = 0.95;
-    result.emitter.initial_position_p = compile_emitter_expr(&result, SOURCE(
-        Rx = rand01();
-        Ry = rand01();
-        theta = Rx * 2.0 * PI * emitter_life * 5.0;
-        r = Ry * 1.1415; // * emitter_life;
-        sr = sqrt(r);
-        sr * vec3(cos(theta), 0.0, sin(theta));
-    ));
+    result.emitter.drag = 0.95f;
+    //result.emitter.initial_position_p = compile_emitter_expr(&result, SOURCE(
+    //    Rx = rand01();
+    //    Ry = rand01();
+    //    theta = Rx * 2.0 * PI * emitter_life * 5.0;
+    //    r = Ry * 1.1415; // * emitter_life;
+    //    sr = sqrt(r);
+    //    sr * vec3(cos(theta), 0.0, sin(theta));
+    //));
     result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
-    result.emitter.initial_velocity_p = compile_emitter_expr(&result, SOURCE(
-        vec3(random01-0.5, 8, sin(random01*3.2)-0.5) * 0.25;
-    ));
+    //result.emitter.initial_velocity_p = compile_emitter_expr(&result, SOURCE(
+    //    vec3(random01-0.5, 8, sin(random01*3.2)-0.5) * 0.25;
+    //));
 
-    result.acceleration = compile_particle_expr(&result, SOURCE(
-        Rx = rand01();
-        Ry = rand01();
-        Rz = rand01();
-        target = vec3(0, 5 * emitter_life, 0);
-        v = target - particle_position;
-        v * 10.0 * emitter_life + vec3(Rx * 2.0 - 1.0, Ry * 2.0 - 1.0, Rz * 2.0 - 1.0) * 10.0 * emitter_life;
-    ));
-    result.size = compile_particle_expr(&result, SOURCE(
-        emitter_life * 0.08 + 0.08 + 0.02 * particle_random - 0.04 * particle_life;// + random01 * 0.018;
-    ));
-    result.color = compile_particle_expr(&result, SOURCE(
-        c0 = lerp(vec4(1.0, 1.0, 0.5, 1.0), vec4(1.0, 0.5, 0.0, 1.0), clamp01(particle_life * 2.0));
-        lerp(c0, vec4(0.5, 0.0, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
-    ));
+    //result.acceleration_p = compile_particle_expr(&result, SOURCE(
+    //    Rx = rand01();
+    //    Ry = rand01();
+    //    Rz = rand01();
+    //    target = vec3(0, 5 * emitter_life, 0);
+    //    v = target - particle_position;
+    //    v * 10.0 * emitter_life + vec3(Rx * 2.0 - 1.0, Ry * 2.0 - 1.0, Rz * 2.0 - 1.0) * 10.0 * emitter_life;
+    //));
+    result.size = 1.0f;
+    //result.size_p = compile_particle_expr(&result, SOURCE(
+    //    emitter_life * 0.08 + 0.08 + 0.02 * particle_random - 0.04 * particle_life;// + random01 * 0.018;
+    //));
+    result.color = vec4{1, 1, 1, 1};
+    //result.color_p = compile_particle_expr(&result, SOURCE(
+    //    c0 = lerp(vec4(1.0, 1.0, 0.5, 1.0), vec4(1.0, 0.5, 0.0, 1.0), clamp01(particle_life * 2.0));
+    //    lerp(c0, vec4(0.5, 0.0, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
+    //));
     return result;
 }
 
@@ -1019,20 +1046,20 @@ Particle_System create_psys2()
         vec3(Rx, 2, Ry) - vec3(0.5, 0, 0.5); // vec3(R.x - 0.5, 2, R.y - 0.5);
     ));
 
-    result.acceleration = compile_particle_expr(&result, SOURCE(
+    result.acceleration_p = compile_particle_expr(&result, SOURCE(
         p = particle_position;
         cs = cos(p * PI);
         sn = sin(p * PI * 2);
         wind = cs * sn + cs * cs;
         //wind = vec3(cos(emitter_life*PI), 0, sin(emitter_life*PI));
     ));
-    result.size = compile_particle_expr(&result, SOURCE(
+    result.size_p = compile_particle_expr(&result, SOURCE(
         t = particle_life - 0.5;
         t = 1.0 - t * t;
         t * 1.2;
         //0.2;
     ));
-    result.color = compile_particle_expr(&result, SOURCE(
+    result.color_p = compile_particle_expr(&result, SOURCE(
         c0 = lerp(vec4(0.01, 0.01, 2.2, 1.0), vec4(1.0, 1.0, 0.5, 1.0), clamp01(particle_position.y * 0.5));
         t0 = 2 * clamp01(particle_life) - 1;
         t = t0 * t0;
@@ -1072,16 +1099,16 @@ Particle_System create_psys3()
         vec3(Rx, 4, Ry) - vec3(0.5, 0, 0.5); // vec3(R.x - 0.5, 2, R.y - 0.5);
     ));
 
-    result.acceleration = compile_particle_expr(&result, SOURCE(
+    result.acceleration_p = compile_particle_expr(&result, SOURCE(
         p = particle_position;
         wind = cos(p) * 0.4 + vec3(0, 0.8, 0);
         //wind = vec3(cos(emitter_life*PI), 0, sin(emitter_life*PI));
     ));
-    result.size = compile_particle_expr(&result, SOURCE(
+    result.size_p = compile_particle_expr(&result, SOURCE(
         t = particle_life;
         0.4 + t * 1.2;
     ));
-    result.color = compile_particle_expr(&result, SOURCE(
+    result.color_p = compile_particle_expr(&result, SOURCE(
         c0 = lerp(vec4(1.0, 0.8, 0.6, 1.0), vec4(0.2, 0.2, 0.2, 1.0), clamp01(particle_position.y * 0.25));
         t0 = clamp01(2 * particle_life - 1);
         t = t0 * t0;
@@ -1091,7 +1118,6 @@ Particle_System create_psys3()
     //exit(0);
     return result;
 }
-
 struct Particle_DrawBuffer
 {
     int cap;
@@ -1435,6 +1461,482 @@ void draw(Camera camera, int width, int height, Particle_System *PS, Emitter_Ins
     glEnd();
 }
 
+const char* read_file(const char *filename, int *len)
+{
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) return nullptr;
+
+    fseek(fp, 0, SEEK_END);
+    int file_len = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    char *s = (char*)malloc(file_len);
+    fread(s, 1, file_len, fp);
+
+    *len = file_len;
+    return s;
+}
+
+struct StringRef
+{
+    const char *s;
+    int len;
+};
+
+bool str_equals(StringRef s1, const char *s2)
+{
+    int len = 0;
+    while (s2[0] != '\0' && len < s1.len)
+    {
+        if (s1.s[len] != s2[0]) return false;
+        s2++;
+        len++;
+    }
+
+    return (len == s1.len);
+}
+
+bool skip_whitespace(const char *&p, const char *end)
+{
+    bool ws_found = false;
+    while (p < end)
+    {
+        switch (p[0])
+        {
+            case '\n': case '\r': case ' ': case '\t':
+                ws_found = true;
+                p++;
+                continue;
+        }
+        break;
+    }
+    return ws_found;
+}
+
+StringRef read_attribute(const char *&p, const char *end)
+{
+    if (p >= end) return { };
+    if (!isalpha(p[0])) return { };
+
+    const char *start = p;
+    while ((p < end) && (isalpha(p[0]) || p[0] == '_'))
+    {
+        p++;
+    }
+    int len = p - start;
+    return {start, len};
+}
+
+enum Attribute_ValueType
+{
+    ATTR_BOOLEAN,
+    ATTR_F1, ATTR_F2, ATTR_F3, ATTR_F4,
+    ATTR_PROGRAM,
+};
+
+bool convert_boolean(const char *s, int len)
+{
+    (void)len;
+    return s[0] == 't';
+}
+
+float convert_f1(const char *s, int len)
+{
+    char buf[32];
+    memcpy(buf, s, len);
+    buf[len] = '\0';
+    return atof(buf);
+}
+
+void convert_f2(float *v, const char *s, int len)
+{
+    (void)len;
+    s += 5; // vec2(
+    int i = 0;
+    while (s[0] != ')')
+    {
+        while (s[0] == ' ') s++;
+        const char *start = s;
+        while (s[0] != ',' && s[0] != ')' && s[0] != ' ') s++;
+
+        v[i] = convert_f1(start, s - start);
+
+        while (s[0] == ' ') s++;
+        if (s[0] == ',') s++;
+        i++;
+    }
+}
+
+void convert_f3(float *v, const char *s, int len)
+{
+    (void)len;
+    s += 5; // vec3(
+    int i = 0;
+    while (s[0] != ')')
+    {
+        while (s[0] == ' ') s++;
+        const char *start = s;
+        while (s[0] != ',' && s[0] != ')' && s[0] != ' ') s++;
+
+        v[i] = convert_f1(start, s - start);
+
+        while (s[0] == ' ') s++;
+        if (s[0] == ',') s++;
+        i++;
+    }
+}
+
+void convert_f4(float *v, const char *s, int len)
+{
+    (void)len;
+    s += 5; // vec4(
+    int i = 0;
+    while (s[0] != ')')
+    {
+        while (s[0] == ' ') s++;
+        const char *start = s;
+        while (s[0] != ',' && s[0] != ')' && s[0] != ' ') s++;
+
+        v[i] = convert_f1(start, s - start);
+
+        while (s[0] == ' ') s++;
+        if (s[0] == ',') s++;
+        i++;
+    }
+}
+
+StringRef read_value(const char *&p, const char *file_end, Attribute_ValueType *type)
+{
+    switch (p[0])
+    {
+    case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+        {
+            *type = ATTR_F1;
+            const char *start = p;
+            while (p < file_end && isdigit(p[0])) p++;
+            if (p < file_end && p[0] == '.')
+            {
+                p++;
+                while (p < file_end && isdigit(p[0])) p++;
+                if (p < file_end && (p[0] == 'e' || p[0] == 'E'))
+                {
+                    p++;
+                    if (p < file_end && (p[0] == '-' || p[0] == '+')) p++;
+                    while (p < file_end && isdigit(p[0])) p++;
+                }
+            }
+            int len = p - start;
+            return {start, len};
+        } break;
+    case 'v':
+        {
+            const char *start = p;
+            if (p + 5 < file_end &&
+                (p[0] == 'v' && p[1] == 'e' && p[2] == 'c' && p[4] == '('))
+            {
+                p += 5;
+                switch (p[-2])
+                {
+                case '2':
+                    {
+                        *type = ATTR_F2;
+                    } break;
+                case '3':
+                    {
+                        *type = ATTR_F3;
+                    } break;
+                case '4':
+                    {
+                        *type = ATTR_F4;
+                    } break;
+                }
+
+                while (p < file_end && p[0] != ')') p++;
+                if (p == file_end)
+                {
+                    printf("Error: unexpected end of file\n");
+                    return { };
+                }
+                p++; // skip ')'
+            }
+            else
+            {
+                printf("Error: Expected vec2, vec3 or vec4\n");
+                return { };
+            }
+            int len = p - start;
+            return {start, len};
+        } break;
+    case '{':
+        {
+            if (p + 1 >= file_end || p[1] != '{')
+            {
+                printf("Error: Expected {{ to start expression\n");
+                return { };
+            }
+            p += 2;
+
+            *type = ATTR_PROGRAM;
+            const char *start = p;
+            while (p < file_end && p[0] != '}')
+            {
+                p++;
+            }
+
+            const char *end = p;
+            if (p + 1 >= file_end && p[1] != '}')
+            {
+                printf("Error: Expected }} to end expression\n");
+                return { };
+            }
+            p += 2;
+
+            int len = end - start;
+            return {start, len};
+        } break;
+    }
+    printf("ERROR: INVALID VALUE\n");
+    return { };
+}
+
+Particle_System load_particle_system(const char *filename)
+{
+    Particle_System result = { };
+    result.stretch = false;
+    result.emitter.life_max = 8.0f;
+    result.emitter.loop = true;
+    result.emitter.rate = 800.0f;
+    result.emitter.initial_life = 2.0f;
+    result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
+    result.emitter.drag = 0.95f;
+    result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
+    result.size = 1.2f;
+    result.color = vec4{1, 1, 1, 1};
+
+    //return result;
+
+    int file_len = 0;
+    const char *file_str = read_file(filename, &file_len);
+
+    if (!file_str) return result;
+
+    const char *file_end = file_str + file_len;
+    const char *p = file_str;
+
+    enum { EMITTER_ATTRIBUTE_NUM = 7, PARTICLE_ATTRIBUTE_NUM = 3 };
+    struct {
+        const char *name;
+        Attribute_ValueType type;
+        float *value;
+        FXVM_Program *p_value;
+        bool *b_value;
+    } emitter_attribute_map[EMITTER_ATTRIBUTE_NUM] = {
+        {"emitter_life_max", ATTR_BOOLEAN, &result.emitter.life_max, nullptr, nullptr},
+        {"emitter_loop", ATTR_F1, nullptr, nullptr, &result.emitter.loop},
+        {"emitter_rate", ATTR_F1, &result.emitter.rate, &result.emitter.rate_p, nullptr},
+        {"drag", ATTR_F1, &result.emitter.drag, &result.emitter.drag_p, nullptr},
+        {"initial_life", ATTR_F1, &result.emitter.initial_life, &result.emitter.initial_life_p, nullptr},
+        {"initial_position", ATTR_F3, &result.emitter.initial_position.x, &result.emitter.initial_position_p, nullptr},
+        {"initial_velocity", ATTR_F3, &result.emitter.initial_velocity.x, &result.emitter.initial_velocity_p, nullptr},
+    }, particle_attribute_map[PARTICLE_ATTRIBUTE_NUM] = {
+        {"acceleration", ATTR_F3, &result.acceleration.x, &result.acceleration_p, nullptr},
+        {"color", ATTR_F4, &result.color.x, &result.color_p, nullptr},
+        {"size", ATTR_F1, &result.size, &result.size_p, nullptr},
+    };
+
+    while (p < file_end)
+    {
+        skip_whitespace(p, file_end);
+        if (p == file_end)
+        {
+            break;
+        }
+
+        StringRef attribute = read_attribute(p, file_end);
+        if (!attribute.s)
+        {
+            // TODO: line and column
+            printf("Error: was expecting for an attribute\n");
+            goto err;
+        }
+
+        skip_whitespace(p, file_end);
+        if (p == file_end || p[0] != '=')
+        {
+            // TODO: line and column
+            printf("Error: was expecting =\n");
+            goto err;
+        }
+
+        p++; // skip '='
+
+        skip_whitespace(p, file_end);
+        if (p == file_end)
+        {
+            printf("Error: unexpected end of file\n");
+            goto err;
+        }
+
+        printf("Got attribute %.5s\n", attribute.s);
+
+        Attribute_ValueType type;
+        StringRef value = read_value(p, file_end, &type);
+
+        printf("Got value %.17s type %d\n", value.s, type);
+
+        bool emitter_attrib_found = false;
+        for (int i = 0; i < EMITTER_ATTRIBUTE_NUM; i++)
+        {
+            auto attrib = emitter_attribute_map[i];
+            if (str_equals(attribute, attrib.name))
+            {
+                emitter_attrib_found = true;
+                switch (type)
+                {
+                case ATTR_BOOLEAN:
+                    {
+                        if (!attrib.b_value)
+                        {
+                            printf("Error: no boolean value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        *attrib.b_value = convert_boolean(value.s, value.len);
+                    } break;
+                case ATTR_F1:
+                    {
+                        if (!attrib.value)
+                        {
+                            printf("Error: no scalar value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        *attrib.value = convert_f1(value.s, value.len);
+                    } break;
+                case ATTR_F2:
+                    {
+                        if (!attrib.value)
+                        {
+                            printf("Error: no vec2 value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        convert_f2(attrib.value, value.s, value.len);
+                    } break;
+                case ATTR_F3:
+                    {
+                        if (!attrib.value)
+                        {
+                            printf("Error: no vec3 value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        convert_f3(attrib.value, value.s, value.len);
+                    } break;
+                case ATTR_F4:
+                    {
+                        if (!attrib.value)
+                        {
+                            printf("Error: no vec4 value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        convert_f4(attrib.value, value.s, value.len);
+                    } break;
+                case ATTR_PROGRAM:
+                    {
+                        if (!attrib.p_value)
+                        {
+                            printf("Error: no program value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        *attrib.p_value = compile_emitter_expr(&result, value.s, value.len);
+                    } break;
+                }
+            }
+        }
+        if (emitter_attrib_found) continue;
+
+        bool particle_attrib_found = false;
+        for (int i = 0; i < PARTICLE_ATTRIBUTE_NUM; i++)
+        {
+            auto attrib = particle_attribute_map[i];
+            if (str_equals(attribute, attrib.name))
+            {
+                particle_attrib_found = true;
+                switch (type)
+                {
+                case ATTR_BOOLEAN:
+                    {
+                        if (!attrib.b_value || attrib.type != type)
+                        {
+                            printf("Error: no boolean value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        *attrib.b_value = convert_boolean(value.s, value.len);
+                    } break;
+                case ATTR_F1:
+                    {
+                        if (!attrib.value || attrib.type != type)
+                        {
+                            printf("Error: no scalar value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        *attrib.value = convert_f1(value.s, value.len);
+                    } break;
+                case ATTR_F2:
+                    {
+                        if (!attrib.value || attrib.type != type)
+                        {
+                            printf("Error: no vec2 value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        convert_f2(attrib.value, value.s, value.len);
+                    } break;
+                case ATTR_F3:
+                    {
+                        if (!attrib.value || attrib.type != type)
+                        {
+                            printf("Error: no vec3 value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        convert_f3(attrib.value, value.s, value.len);
+                    } break;
+                case ATTR_F4:
+                    {
+                        if (!attrib.value || attrib.type != type)
+                        {
+                            printf("Error: no vec4 value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        convert_f4(attrib.value, value.s, value.len);
+                    } break;
+                case ATTR_PROGRAM:
+                    {
+                        if (!attrib.p_value) // TODO: get the return type of the program, ensure compatible
+                        {
+                            printf("Error: no program value allowed for %s\n", attrib.name);
+                            goto err;
+                        }
+                        *attrib.p_value = compile_emitter_expr(&result, value.s, value.len);
+                    } break;
+                }
+            }
+        }
+        if (particle_attrib_found) continue;
+
+        char buf[64];
+        strncpy(buf, attribute.s, attribute.len);
+        buf[attribute.len] = '\0';
+        printf("Error: unknown attribute '%s'\n", buf);
+        goto err;
+    }
+
+    free((void*)file_str);
+    return result;
+
+err:
+    free((void*)file_str);
+    return { };
+}
+
+
+
 void mouse_wheel(float wheel, Camera *camera)
 {
     camera->zoom += wheel * 0.05f;
@@ -1521,7 +2023,8 @@ int main(int argc, char **argv)
     Particle_System PS2 = create_psys2();
     Emitter_Instance E2 = new_emitter(&PS2, vec3{2, 0, 0});
 
-    Particle_System PS3 = create_psys3();
+    //Particle_System PS3 = create_psys3();
+    Particle_System PS3 = load_particle_system("particle_systems/simple.psys");
     Emitter_Instance E3 = new_emitter(&PS3, vec3{-2, 0, 0});
 
     FXVM_Machine vm = fxvm_new();
@@ -1588,8 +2091,8 @@ int main(int argc, char **argv)
         while (time_accum >= sim_dt)
         {
             uint64_t start_cycles = __rdtsc(), emit_cycles = 0, compact_cycles = 0;
-            simulate(&vm, &PS1, &E1, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
-            simulate(&vm, &PS2, &E2, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
+            //simulate(&vm, &PS1, &E1, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
+            //simulate(&vm, &PS2, &E2, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
             simulate(&vm, &PS3, &E3, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
             uint64_t end_cycles = __rdtsc();
 
