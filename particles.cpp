@@ -27,7 +27,26 @@ struct Window
 
     void *wheel_user_ptr;
     void (*mouse_wheel)(float wheel, void *user_ptr);
+
+    void *key_down_user_ptr;
+    void (*key_down)(int key, void *user_ptr);
+    void *key_up_user_ptr;
+    void (*key_up)(int key, void *user_ptr);
 };
+
+template <class T>
+void set_window_key_down(Window *w, void (*fn)(int, T*), T *user_ptr)
+{
+    w->key_down = (void(*)(int, void*))fn;
+    w->key_down_user_ptr = user_ptr;
+}
+
+template <class T>
+void set_window_key_up(Window *w, void (*fn)(int, T*), T *user_ptr)
+{
+    w->key_up = (void(*)(int, void*))fn;
+    w->key_up_user_ptr = user_ptr;
+}
 
 LRESULT CALLBACK WindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
 {
@@ -46,6 +65,16 @@ LRESULT CALLBACK WindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
                 window->running = false;
                 return 0;
             }
+            else
+            {
+                int key = wparam;
+                if (window->key_down) window->key_down(key, window->key_down_user_ptr);
+            }
+        } break;
+    case WM_KEYUP:
+        {
+            int key = wparam;
+            if (window->key_up) window->key_up(key, window->key_up_user_ptr);
         } break;
     case WM_MOUSEWHEEL:
         {
@@ -897,8 +926,8 @@ struct Camera
 
 void move_camera(Camera *camera, int delta_x, int delta_y)
 {
-    camera->rotation.y += (float)delta_x * 0.02f;
-    camera->rotation.x += (float)delta_y * 0.02f;
+    camera->rotation.y += (float)delta_x * 0.015f;
+    camera->rotation.x += (float)delta_y * 0.015f;
 }
 
 mat4 camera_matrix(Camera camera)
@@ -985,36 +1014,36 @@ Particle_System load_psys()
     result.emitter.initial_life = 2.0f;
     result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
     result.emitter.drag = 0.95f;
-    //result.emitter.initial_position_p = compile_emitter_expr(&result, SOURCE(
-    //    Rx = rand01();
-    //    Ry = rand01();
-    //    theta = Rx * 2.0 * PI * emitter_life * 5.0;
-    //    r = Ry * 1.1415; // * emitter_life;
-    //    sr = sqrt(r);
-    //    sr * vec3(cos(theta), 0.0, sin(theta));
-    //));
+    result.emitter.initial_position_p = compile_emitter_expr(&result, SOURCE(
+        Rx = rand01();
+        Ry = rand01();
+        theta = Rx * 2.0 * PI * emitter_life * 5.0;
+        r = Ry * 1.1415; // * emitter_life;
+        sr = sqrt(r);
+        sr * vec3(cos(theta), 0.0, sin(theta));
+    ));
     result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
-    //result.emitter.initial_velocity_p = compile_emitter_expr(&result, SOURCE(
-    //    vec3(random01-0.5, 8, sin(random01*3.2)-0.5) * 0.25;
-    //));
+    result.emitter.initial_velocity_p = compile_emitter_expr(&result, SOURCE(
+        vec3(random01-0.5, 8, sin(random01*3.2)-0.5) * 0.25;
+    ));
 
-    //result.acceleration_p = compile_particle_expr(&result, SOURCE(
-    //    Rx = rand01();
-    //    Ry = rand01();
-    //    Rz = rand01();
-    //    target = vec3(0, 5 * emitter_life, 0);
-    //    v = target - particle_position;
-    //    v * 10.0 * emitter_life + vec3(Rx * 2.0 - 1.0, Ry * 2.0 - 1.0, Rz * 2.0 - 1.0) * 10.0 * emitter_life;
-    //));
+    result.acceleration_p = compile_particle_expr(&result, SOURCE(
+        Rx = rand01();
+        Ry = rand01();
+        Rz = rand01();
+        target = vec3(0, 5 * emitter_life, 0);
+        v = target - particle_position;
+        v * 10.0 * emitter_life + vec3(Rx * 2.0 - 1.0, Ry * 2.0 - 1.0, Rz * 2.0 - 1.0) * 10.0 * emitter_life;
+    ));
     result.size = 1.0f;
-    //result.size_p = compile_particle_expr(&result, SOURCE(
-    //    emitter_life * 0.08 + 0.08 + 0.02 * particle_random - 0.04 * particle_life;// + random01 * 0.018;
-    //));
+    result.size_p = compile_particle_expr(&result, SOURCE(
+        emitter_life * 0.08 + 0.08 + 0.02 * particle_random - 0.04 * particle_life;// + random01 * 0.018;
+    ));
     result.color = vec4{1, 1, 1, 1};
-    //result.color_p = compile_particle_expr(&result, SOURCE(
-    //    c0 = lerp(vec4(1.0, 1.0, 0.5, 1.0), vec4(1.0, 0.5, 0.0, 1.0), clamp01(particle_life * 2.0));
-    //    lerp(c0, vec4(0.5, 0.0, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
-    //));
+    result.color_p = compile_particle_expr(&result, SOURCE(
+        c0 = lerp(vec4(1.0, 1.0, 0.5, 1.0), vec4(1.0, 0.5, 0.0, 1.0), clamp01(particle_life * 2.0));
+        lerp(c0, vec4(0.5, 0.0, 0.0, 0.0), clamp01(particle_life * 2.0 - 1.0));
+    ));
     return result;
 }
 
@@ -1913,7 +1942,7 @@ Particle_System load_particle_system(const char *filename)
                             printf("Error: no program value allowed for %s\n", attrib.name);
                             goto err;
                         }
-                        *attrib.p_value = compile_emitter_expr(&result, value.s, value.len);
+                        *attrib.p_value = compile_particle_expr(&result, value.s, value.len);
                     } break;
                 }
             }
@@ -1940,6 +1969,16 @@ err:
 void mouse_wheel(float wheel, Camera *camera)
 {
     camera->zoom += wheel * 0.05f;
+}
+
+void key_down(int key, bool *keys)
+{
+    keys[key] = true;
+}
+
+void key_up(int key, bool *keys)
+{
+    keys[key] = false;
 }
 
 void (__stdcall *glGenerateMipmap)(GLenum);
@@ -2037,6 +2076,10 @@ int main(int argc, char **argv)
     window.wheel_user_ptr = &camera;
     window.mouse_wheel = (void (*)(float, void*))mouse_wheel;
 
+    bool keys[512] = { };
+    set_window_key_down(&window, key_down, keys);
+    set_window_key_up(&window, key_up, keys);
+
     float time_accum = 0.0f;
 
     float sim_dt = 0.01666f;
@@ -2059,6 +2102,8 @@ int main(int argc, char **argv)
 
     Particle_DrawBuffer particle_buffer = { };
 
+    bool last_L = false;
+
     MSG msg = { };
     while (window.running)
     {
@@ -2076,6 +2121,12 @@ int main(int argc, char **argv)
         }
         window.last_mouse_x = window.mouse_x;
         window.last_mouse_y = window.mouse_y;
+
+        if (!last_L && keys['L'])
+        {
+            PS3 = load_particle_system("particle_systems/simple.psys");
+        }
+        last_L = keys['L'];
 
         LARGE_INTEGER last_counter = counter;
         QueryPerformanceCounter(&counter);

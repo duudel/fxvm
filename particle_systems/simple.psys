@@ -1,12 +1,26 @@
 
-drag = 0
+emitter_rate = 100.0
+
+drag = 1
 
 initial_velocity = vec3(0, 10, 0)
 initial_velocity = {{
-    vec3(2, 1, 2) * vec3(rand01(), 5, rand01()) - vec3(1, 0, 1);
+    vec3(1, 1, 1) * vec3(rand01(), 2, rand01()) - vec3(1, 0, 1);
 }}
 
-color = vec4(1, 0, 1, 1)
+acceleration = {{
+    t = particle_life;
+    vec3(1, 0.2, 0.2) * (0.2 + t);
+}}
 
-size = 0.2
+color = vec4(0, 1, 0, 1)
+color = {{
+    t = particle_life;
+    lerp(vec4(1, 0.5, 0.5, 1), vec4(0.5, 0.6, 0.2, 0.02), t);
+}}
+
+size = {{
+    t = particle_life;
+    lerp(0.2, 0.5, t);
+}}
 
