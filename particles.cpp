@@ -516,6 +516,21 @@ struct Particle_System
     int emitter_life_i;
 };
 
+void free_particle_system(Particle_System *ps)
+{
+    fxvm_program_free(&ps->emitter.rate_p);
+    fxvm_program_free(&ps->emitter.initial_life_p);
+    fxvm_program_free(&ps->emitter.initial_position_p);
+    fxvm_program_free(&ps->emitter.initial_velocity_p);
+    fxvm_program_free(&ps->emitter.drag_p);
+
+    fxvm_program_free(&ps->acceleration_p);
+    fxvm_program_free(&ps->color_p);
+    fxvm_program_free(&ps->size_p);
+
+    *ps = { };
+}
+
 Emitter_Instance new_emitter(Particle_System *PS, vec3 position)
 {
     Emitter_Instance result = { };
@@ -2102,6 +2117,8 @@ int main(int argc, char **argv)
 
     Particle_DrawBuffer particle_buffer = { };
 
+    bool last_J = false;
+    bool last_K = false;
     bool last_L = false;
 
     MSG msg = { };
@@ -2122,10 +2139,23 @@ int main(int argc, char **argv)
         window.last_mouse_x = window.mouse_x;
         window.last_mouse_y = window.mouse_y;
 
+        if (!last_J && keys['J'])
+        {
+            free_particle_system(&PS1);
+            PS1 = load_particle_system("particle_systems/example.psys");
+        }
+        if (!last_K && keys['K'])
+        {
+            free_particle_system(&PS2);
+            PS2 = load_particle_system("particle_systems/simple.psys");
+        }
         if (!last_L && keys['L'])
         {
+            free_particle_system(&PS3);
             PS3 = load_particle_system("particle_systems/simple.psys");
         }
+        last_J = keys['J'];
+        last_K = keys['K'];
         last_L = keys['L'];
 
         LARGE_INTEGER last_counter = counter;
@@ -2142,8 +2172,8 @@ int main(int argc, char **argv)
         while (time_accum >= sim_dt)
         {
             uint64_t start_cycles = __rdtsc(), emit_cycles = 0, compact_cycles = 0;
-            //simulate(&vm, &PS1, &E1, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
-            //simulate(&vm, &PS2, &E2, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS1, &E1, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS2, &E2, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
             simulate(&vm, &PS3, &E3, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
             uint64_t end_cycles = __rdtsc();
 

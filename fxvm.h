@@ -37,6 +37,7 @@ void set_uniform_f3(FXVM_Program *program, int uniform_location, const float *da
 void set_uniform_f4(FXVM_Program *program, int uniform_location, const float *data);
 
 FXVM_Program fxvm_program_new(FXVM_Bytecode bytecode);
+void fxvm_program_free(FXVM_Program *program);
 
 struct FXVM_Machine
 {
@@ -118,6 +119,12 @@ FXVM_Program fxvm_program_new(FXVM_Bytecode bytecode)
     FXVM_Program result = { };
     result.bytecode = bytecode;
     return result;
+}
+
+void fxvm_program_free(FXVM_Program *program)
+{
+    free(program->bytecode.code);
+    *program = { };
 }
 
 #include <cstdio>
