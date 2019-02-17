@@ -2032,19 +2032,8 @@ GLuint make_floor_texture()
     return texture;
 }
 
-int main(int argc, char **argv)
+GLuint make_particle_texture()
 {
-    (void)argc; (void)argv;
-    Window window = { };
-    create_window(1000, 800, &window);
-
-    // After GL context is created
-    glGenerateMipmap = (void (*)(GLenum))(void*)wglGetProcAddress("glGenerateMipmap");
-
-    glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
-
-    GLuint floor_tex = make_floor_texture();
-
     uint8_t tex_data[128] = {
         255,  2, 255,  4, 255,   8, 255,  16, 255,  16, 255,   8, 255,  4, 255,  2,
         255,  4, 255,  8, 255,  16, 255,  32, 255,  32, 255,  16, 255,  8, 255,  4,
@@ -2056,9 +2045,9 @@ int main(int argc, char **argv)
         255,  2, 255,  4, 255,   8, 255,  16, 255,  16, 255,   8, 255,  4, 255,  2,
     };
 
-    GLuint particle_tex;
-    glGenTextures(1, &particle_tex);
-    glBindTexture(GL_TEXTURE_2D, particle_tex);
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(GL_TEXTURE_2D,
             0, // level
             GL_RGBA,
@@ -2074,6 +2063,23 @@ int main(int argc, char **argv)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
 
+    return texture;
+}
+
+int main(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    Window window = { };
+    create_window(1000, 800, &window);
+
+    // After GL context is created
+    glGenerateMipmap = (void (*)(GLenum))(void*)wglGetProcAddress("glGenerateMipmap");
+
+    glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
+
+    GLuint floor_tex = make_floor_texture();
+    GLuint particle_tex = make_particle_texture();
+
     //Particle_System PS1 = load_psys();
     Particle_System PS1 = load_particle_system("particle_systems/example.psys");
     Emitter_Instance E1 = new_emitter(&PS1, vec3{0, 0, 0});
@@ -2087,8 +2093,6 @@ int main(int argc, char **argv)
     Emitter_Instance E3 = new_emitter(&PS3, vec3{-2, 0, 0});
 
     FXVM_Machine vm = fxvm_new();
-
-    //exit(0);
 
     Camera camera = { };
     camera.zoom = 5.0f;
