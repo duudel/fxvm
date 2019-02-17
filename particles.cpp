@@ -1058,6 +1058,7 @@ struct Particle_DrawBuffer
     vec3 *h0;
     vec3 *h1;
     vec4 *color;
+    bool *additive;
 };
 
 int add_particle_buffer_particle(Particle_DrawBuffer *buffer)
@@ -1070,6 +1071,7 @@ int add_particle_buffer_particle(Particle_DrawBuffer *buffer)
         buffer->h0 = (vec3*)realloc(buffer->h0, sizeof(vec3) * new_cap);
         buffer->h1 = (vec3*)realloc(buffer->h1, sizeof(vec3) * new_cap);
         buffer->color = (vec4*)realloc(buffer->color, sizeof(vec4) * new_cap);
+        buffer->additive = (bool*)realloc(buffer->additive, sizeof(bool) * new_cap);
         buffer->cap = new_cap;
     }
 
@@ -1078,7 +1080,7 @@ int add_particle_buffer_particle(Particle_DrawBuffer *buffer)
     return i;
 }
 
-void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, int i, mat4 view_mat, vec3 right, vec3 up, vec3 look, bool stretch)
+void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, int i, mat4 view_mat, vec3 right, vec3 up, vec3 look, bool stretch, bool additive)
 {
     int bi = add_particle_buffer_particle(buffer);
 
@@ -1148,6 +1150,7 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
     depth &= 0xffff0000;
 
     buffer->sort_key[bi] = (uint32_t)depth | (uint32_t)bi;
+    buffer->additive[bi] = additive;
     buffer->P[bi] = w_pos;
     buffer->h0[bi] = h0;
     buffer->h1[bi] = h1;
@@ -1165,7 +1168,7 @@ void draw_to_buffer(Particle_DrawBuffer *buffer, Camera camera, Particle_System 
 
     for (int i = 0; i < E->particles_alive; i++)
     {
-        emit_particle_buffer_particle(buffer, P, i, view_mat, right, up, look, PS->stretch);
+        emit_particle_buffer_particle(buffer, P, i, view_mat, right, up, look, PS->stretch, PS->additive);
     }
 }
 
@@ -1207,22 +1210,13 @@ void draw_particle_buffer(Particle_DrawBuffer *buffer, GLuint texture)
 {
     std::sort(buffer->sort_key, buffer->sort_key + buffer->size);
 
-    /*
-    if (PS->additive)
-    {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE);
-    }
-    else
-    */
-    {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        //glDisable(GL_BLEND);
-    }
-
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
+
+    glEnable(GL_BLEND);
+    //glBlendFunc(GL_ONE, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    bool additive_on = true;
 
     glBegin(GL_TRIANGLES);
     for (int i = 0; i < buffer->size; i++)
@@ -1230,9 +1224,27 @@ void draw_particle_buffer(Particle_DrawBuffer *buffer, GLuint texture)
         uint32_t key = buffer->sort_key[i];
         uint32_t index = key & 0xffff;
 
+        if (buffer->additive[index] != additive_on)
+        {
+            glEnd();
+            if (buffer->additive[index])
+            {
+                //glBlendFunc(GL_ONE, GL_ONE);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            }
+            else
+            {
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            }
+            additive_on = buffer->additive[index];
+            glBegin(GL_TRIANGLES);
+        }
+
         draw_particle_buffer_particle(buffer, index);
     }
     glEnd();
+
+    glDisable(GL_BLEND);
 }
 
 void draw_floor(GLuint texture)
@@ -1294,6 +1306,7 @@ void draw(Particle_DrawBuffer *buffer, GLuint particle_tex, GLuint floor_tex, Ca
 }
 
 
+// OLD
 void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look, bool stretch)
 {
     float size = P->size[i] * 0.5f;
@@ -1379,62 +1392,6 @@ void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look, bool str
     glVertex3fv(&w_pos2.x);
     glTexCoord2f(1.0f, 0.0f);
     glVertex3fv(&w_pos3.x);
-}
-
-void draw_old(Camera camera, int width, int height, Particle_System *PS, Emitter_Instance *E)
-{
-    Particles *P = &E->P;
-
-    mat4 camera_proj = Perspective_lh(90.0f, (float)width / (float)height, 0.1f, 1000.0f);
-    camera_proj = transpose(camera_proj);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadMatrixf(camera_proj.m);
-
-    mat4 view_mat = camera_matrix(camera);
-    vec3 right = {view_mat[0], view_mat[1], view_mat[2]};
-    vec3 up = {view_mat[4], view_mat[5], view_mat[6]};
-    vec3 look = {view_mat[8], view_mat[9], view_mat[10]};
-
-    view_mat = transpose(view_mat);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadMatrixf(view_mat.m);
-
-    if (PS->additive)
-    {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE);
-    }
-    else
-    {
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        //glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR);
-        //glDisable(GL_BLEND);
-    }
-
-    glEnable(GL_TEXTURE_2D);
-
-    glBegin(GL_TRIANGLES);
-    for (int i = 0; i < E->particles_alive; i++)
-    {
-        draw_particle(P, i, right, up, look, PS->stretch);
-    }
-    glEnd();
-
-    glDisable(GL_TEXTURE_2D);
-
-    glBegin(GL_LINES);
-    glColor3f(1.0f, 0.0f, 0.0f);
-    glVertex3f(0.0f, 0.0f, 0.0f);
-    glVertex3f(1.0f, 0.0f, 0.0f);
-    glColor3f(0.0f, 1.0f, 0.0f);
-    glVertex3f(0.0f, 0.0f, 0.0f);
-    glVertex3f(0.0f, 1.0f, 0.0f);
-    glColor3f(0.0f, 0.0f, 1.0f);
-    glVertex3f(0.0f, 0.0f, 0.0f);
-    glVertex3f(0.0f, 0.0f, 1.0f);
-    glEnd();
 }
 
 const char* read_file(const char *filename, int *len)
@@ -1724,6 +1681,7 @@ Particle_System load_particle_system(const char *filename)
 {
     Particle_System result = { };
     result.stretch = false;
+    result.additive = false;
     result.emitter.life = 8.0f;
     result.emitter.cooldown = 2.0f;
     result.emitter.loop = true;
@@ -1745,7 +1703,7 @@ Particle_System load_particle_system(const char *filename)
     const char *file_end = file_str + file_len;
     const char *p = file_str;
 
-    enum { EMITTER_ATTRIBUTE_NUM = 7, PARTICLE_ATTRIBUTE_NUM = 3 };
+    enum { EMITTER_ATTRIBUTE_NUM = 9, PARTICLE_ATTRIBUTE_NUM = 3 };
     struct {
         const char *name;
         Attribute_ValueType type;
@@ -1753,6 +1711,8 @@ Particle_System load_particle_system(const char *filename)
         FXVM_Program *p_value;
         bool *b_value;
     } emitter_attribute_map[EMITTER_ATTRIBUTE_NUM] = {
+        {"stretch", ATTR_BOOLEAN, nullptr, nullptr, &result.stretch},
+        {"additive", ATTR_BOOLEAN, nullptr, nullptr, &result.additive},
         {"emitter_loop", ATTR_BOOLEAN, nullptr, nullptr, &result.emitter.loop},
         {"emitter_life", ATTR_F1, &result.emitter.life, nullptr, nullptr},
         {"emitter_rate", ATTR_F1, &result.emitter.rate, &result.emitter.rate_p, nullptr},

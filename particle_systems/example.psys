@@ -1,4 +1,6 @@
 
+additive = true
+
 emitter_life = 1.0
 emitter_loop = true
 
