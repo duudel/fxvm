@@ -451,6 +451,7 @@ struct Particles
 };
 
 
+enum { EMITTER_FRAME_MASK = 0 };
 struct Emitter_Instance
 {
     float fractional_particles;
@@ -467,7 +468,8 @@ struct Emitter_Instance
 
 struct Emitter_Parameters
 {
-    float life_max;
+    float life;
+    float cooldown;
     bool loop;
 
     float rate;
@@ -533,16 +535,19 @@ void free_particle_system(Particle_System *ps)
 
 Emitter_Instance new_emitter(Particle_System *PS, vec3 position)
 {
+    (void)PS;
     Emitter_Instance result = { };
-    result.life = PS->emitter.life_max;
+    result.life = 0.0f; //PS->emitter.life;
     result.position = position;
     return result;
 }
 
 float get_emitter_life(Emitter_Parameters *EP, Emitter_Instance *E)
 {
-    float life10 = E->life / EP->life_max;
-    return clamp01(1.0f - life10);
+    float max_life = ((EP->life >= 0.001f) ? EP->life : 1.0f);
+    float life10 = E->life / max_life;
+    return clamp01(life10);
+    //return clamp01(1.0f - life10);
 }
 
 #include <intrin.h> // for rtdsc
@@ -615,36 +620,64 @@ void eval_f4(FXVM_Machine *vm, vec4 *dest, int instance_index, int instance_coun
     }
 }
 
+void compact(Emitter_Instance *E)
+{
+    Particles *P0 = &E->P[E->frame];
+    Particles *P1 = &E->P[(E->frame + 1) & EMITTER_FRAME_MASK];
+
+    int j = 0;
+    for (int i = 0; i < E->particles_alive; )
+    {
+        while (/*i < Particles::MAX &&*/ P1->life_seconds[i] <= 0.01f)
+        {
+            i++;
+        }
+        //if (i < Particles::MAX)
+        if (P1->life_seconds[i] > 0.01f)
+        if (i < E->particles_alive)
+        {
+            P0->life_seconds[j] = P1->life_seconds[i];
+            P0->life_max[j] = P1->life_max[i];
+            P0->position[j] = P1->position[i];
+            P0->velocity[j] = P1->velocity[i];
+            P0->acceleration[j] = P1->acceleration[i];
+            P0->size[j] = P1->size[i];
+            P0->color[j] = P1->color[i];
+            P0->random[j] = P1->random[i];
+            i++, j++;
+        }
+    }
+    //if (j == 1) printf("PS alive %d\n", E->particles_alive);
+    E->particles_alive = j;
+}
+
 void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
 {
     //Particles *P = &E->P[E->frame & 1];
-    Particles *P = &E->P[(E->frame+1) & 1];
+    Particles *P = &E->P[(E->frame+1) & EMITTER_FRAME_MASK];
 
-    float num = PS->emitter.rate * dt;
+    float emitter_life = get_emitter_life(&PS->emitter, E);
+    set_uniform_f1(&PS->emitter.rate_p, PS->emitter.life_i, &emitter_life);
+
+    float rate = PS->emitter.rate;
+    if (PS->emitter.rate_p.bytecode.code)
+    {
+        rate = eval_f1(vm, 0, &PS->emitter.rate_p);
+    }
+
+    float num = rate * dt;
     float to_emit = num + E->fractional_particles;
     num = trunc(to_emit);
     E->fractional_particles = to_emit - num;
     int num_to_emit = (int)num;
 
     //printf("num to emit %d, fractional_particles %f\n", num_to_emit, E->fractional_particles);
-    //float global_input[16];
-    //global_input[PS->emitter.life_i] = get_emitter_life(&PS->emitter, E);
-
-    float emitter_life = get_emitter_life(&PS->emitter, E);
     set_uniform_f1(&PS->emitter.initial_position_p, PS->emitter.life_i, &emitter_life);
     set_uniform_f1(&PS->emitter.initial_velocity_p, PS->emitter.life_i, &emitter_life);
-
-    E->life -= dt;
-    if (E->life <= 0.0f)
-    {
-        if (PS->emitter.loop) E->life = PS->emitter.life_max;
-    }
 
     int index = E->particles_alive;
     while (num_to_emit > 0 && index < Particles::MAX)
     {
-        //P->position[index] = eval_f3(vm, global_input, nullptr, 0, PS->emitter.initial_position_p) + E->position;
-        //P->velocity[index] = eval_f3(vm, global_input, nullptr, 0, PS->emitter.initial_velocity_p);
         vec3 position = E->position + PS->emitter.initial_position;
         if (PS->emitter.initial_position_p.bytecode.code)
         {
@@ -657,11 +690,9 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
         {
             P->velocity[index] = eval_f3(vm, 0, &PS->emitter.initial_velocity_p);
         }
-        //fflush(stdout);exit(0);
-        //{random01()-0.5f, 1.0f+random01()*0.5f, random01()-0.5f};
-        P->acceleration[index] = PS->emitter.acceleration;//vec3{0.0f, -1.0f, 0.0f};
+        P->acceleration[index] = PS->emitter.acceleration;
 
-        float initial_life = PS->emitter.initial_life; // + random01();
+        float initial_life = PS->emitter.initial_life;
         if (PS->emitter.initial_life_p.bytecode.code)
         {
             initial_life = eval_f1(vm, 0, &PS->emitter.initial_life_p);
@@ -671,7 +702,7 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
         P->life_max[index] = initial_life;
         P->life_01[index] = 0.0f;
         P->size[index] = PS->size;
-        P->color[index] = PS->color; //vec4{1.0f, 1.0f, 1.0f, 1.0f};
+        P->color[index] = PS->color;
         P->random[index] = vec4{random01(), random01(), random01(), random01()};
 
         num_to_emit--;
@@ -688,36 +719,6 @@ void swap(T &a, T &b)
     b = temp;
 }
 
-int compact(Emitter_Instance *E)
-{
-    Particles *P0 = &E->P[E->frame];
-    Particles *P1 = &E->P[(E->frame + 1) & 1];
-
-    int j = 0;
-    for (int i = 0; i < E->particles_alive; )
-    {
-        while (i < Particles::MAX && P1->life_seconds[i] <= 0.0f)
-        {
-            i++;
-        }
-        if (i < Particles::MAX)
-        {
-            P0->life_seconds[j] = P1->life_seconds[i];
-            P0->life_max[j] = P1->life_max[i];
-            P0->position[j] = P1->position[i];
-            P0->velocity[j] = P1->velocity[i];
-            P0->acceleration[j] = P1->acceleration[i];
-            P0->size[j] = P1->size[i];
-            P0->color[j] = P1->color[i];
-            P0->random[j] = P1->random[i];
-            i++, j++;
-        }
-    }
-
-    E->particles_alive = j;
-    return j;
-}
-
 void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt, uint64_t *emit_cycles, uint64_t *compact_cycles)
 {
     uint64_t start_cycles = __rdtsc();
@@ -727,68 +728,22 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
 
     //E->particles_alive = 0;
     start_cycles = __rdtsc();
-    if (E->life > 0.0f)
+    if (E->life >= 0.0f && E->life < PS->emitter.life)
     {
         emit(vm, PS, E, dt);
     }
+    E->life += dt;
+    if (E->life >= PS->emitter.life && E->particles_alive == 0)
+    {
+        if (PS->emitter.loop) E->life = 0.0f - PS->emitter.cooldown;
+    }
+
     end_cycles = __rdtsc();
     *emit_cycles += end_cycles - start_cycles;
 
-    Particles *P = &E->P[E->frame & 1];
+    Particles *P = &E->P[E->frame & EMITTER_FRAME_MASK];
 
     float drag = PS->emitter.drag;
-#if 0
-    float global_input[16];
-    float *attributes[16];
-    attributes[PS->attrib_life] = P->life_01;
-    attributes[PS->attrib_position] = (float*)&P->position;
-    attributes[PS->attrib_velocity] = (float*)&P->velocity;
-    attributes[PS->attrib_acceleration] = (float*)&P->acceleration;
-    attributes[PS->attrib_particle_random] = (float*)&P->random;
-
-    global_input[PS->emitter_life_i] = get_emitter_life(&PS->emitter, E);
-
-    for (int i = 0; i < Particles::MAX; i++)
-    {
-        if (P->life_seconds[i] > 0.0f)
-        {
-            global_input[PS->random_i] = random01();
-
-            P->life_seconds[i] -= dt;
-            if (P->life_seconds[i] < 0.0f) P->life_seconds[i] = 0.0f;
-            P->life_01[i] = 1.0f - P->life_seconds[i] * (1.0f / P->life_max[i]);
-
-            if (PS->acceleration.code)
-            {
-                P->acceleration[i] = eval_f3(global_input, attributes, i, PS->acceleration);
-            }
-
-            vec3 vel = P->velocity[i];
-            float v2 = -dot(vel, vel);
-            vec3 Fd = normalize(vel) * v2 * drag;   // drag force
-            vec3 ad = Fd;                           // drag acceleration F = ma => a = F/m; m = 1.0f => ad = Fd
-            P->acceleration[i] = P->acceleration[i] + ad;
-
-            //P->velocity[i] = (P->velocity[i] + P->acceleration[i] * dt) * drag;
-            P->velocity[i] = P->velocity[i] + P->acceleration[i] * dt;
-            P->position[i] = P->position[i] + P->velocity[i] * dt;
-            P->size[i] = eval_f1(global_input, attributes, i, PS->size);
-            P->color[i] = eval_f3(global_input, attributes, i, PS->color);
-            //printf("P color: %.2f %.2f %.2f\n", P->color[i].x, P->color[i].y, P->color[i].z);
-
-            E->particles_alive++;
-        }
-    }
-#elif 1
-    //float global_input[16];
-    //float *attributes[16];
-    //attributes[PS->attrib_life] = P->life_01;
-    //attributes[PS->attrib_position] = (float*)&P->position;
-    //attributes[PS->attrib_velocity] = (float*)&P->velocity;
-    //attributes[PS->attrib_acceleration] = (float*)&P->acceleration;
-    //attributes[PS->attrib_particle_random] = (float*)&P->random;
-
-    //global_input[PS->emitter_life_i] = get_emitter_life(&PS->emitter, E);
     float emitter_life = get_emitter_life(&PS->emitter, E);
 
     FXVM_AttributeBindings attr_bindings = { };
@@ -824,7 +779,7 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
         if (life_seconds < 0.0f) life_seconds = 0.0f;
 
         P->life_seconds[i] = life_seconds;
-        P->life_01[i] = 1.0f - life_seconds * (1.0f / P->life_max[i]);
+        P->life_01[i] = clamp01(1.0f - life_seconds * (1.0f / P->life_max[i]));
 
         vec3 acceleration = PS->emitter.acceleration;
         if (PS->acceleration_p.bytecode.code) acceleration = P->acceleration[i];
@@ -879,57 +834,8 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
             eval_f4<16>(vm, &P->color[i], i, last_group, &PS->color_p);
         }
     }
-#else
-    auto P1 = &E->P[(E->frame + 0) & 1];
 
-    float global_input[16];
-    float *attributes[16];
-    attributes[PS->attrib_life] = P1->life_01;
-    attributes[PS->attrib_position] = (float*)&P1->position;
-    attributes[PS->attrib_velocity] = (float*)&P1->velocity;
-    attributes[PS->attrib_acceleration] = (float*)&P1->acceleration;
-    attributes[PS->attrib_particle_random] = (float*)&P1->random;
-
-    global_input[PS->emitter_life_i] = get_emitter_life(&PS->emitter, E);
-
-    for (int i = 0; i < E->particles_alive; i++)
-    {
-        global_input[PS->random_i] = random01();
-
-        float life_seconds = P1->life_seconds[i] - dt;
-        if (life_seconds < 0.0f) life_seconds = 0.0f;
-
-        P->life_01[i] = 1.0f - life_seconds * (1.0f / P1->life_max[i]);
-        P->life_seconds[i] = life_seconds;
-
-        vec3 acceleration = PS->emitter.acceleration;
-        if (PS->acceleration.code)
-        {
-            acceleration = eval_f3(vm, global_input, attributes, i, PS->acceleration);
-        }
-
-        vec3 vel = P1->velocity[i];
-        float v2 = -dot(vel, vel);
-        vec3 Fd = normalize(vel) * v2 * drag;   // drag force
-        vec3 ad = Fd;                           // drag acceleration F = ma => a = F/m; m = 1.0f => ad = Fd
-        acceleration = acceleration + ad;
-
-        vec3 velocity = vel + acceleration * dt;
-        vec3 position = P1->position[i] + velocity * dt;
-
-        P->acceleration[i] = acceleration;
-        P->velocity[i] = velocity;
-        P->position[i] = position;
-
-        P->size[i] = eval_f1(vm, global_input, attributes, i, PS->size);
-        P->color[i] = eval_f3(vm, global_input, attributes, i, PS->color);
-
-        P->random[i] = P1->random[i];
-        //printf("P color: %.2f %.2f %.2f\n", P->color[i].x, P->color[i].y, P->color[i].z);
-    }
-#endif
-
-    E->frame = (E->frame + 1) & 1;
+    E->frame = (E->frame + 1) & EMITTER_FRAME_MASK;
 }
 
 struct Camera
@@ -975,7 +881,7 @@ FXVM_Program compile_particle_expr(Particle_System *PS, const char *source, int 
 
     compile(&compiler, source, source + source_len);
     FXVM_Bytecode bytecode = { compiler.codegen.buffer_len, compiler.codegen.buffer };
-#if 1
+#if 0
     printf("----\n");
     printf("%s\n", source);
     printf("====\n");
@@ -1023,9 +929,9 @@ Particle_System load_psys()
 {
     Particle_System result = { };
     result.stretch = true;
-    result.emitter.life_max = 8.0f;
+    result.emitter.life = 8.0f;
     result.emitter.loop = true;
-    result.emitter.rate = 800.0f;
+    result.emitter.rate = 200.0f;
     result.emitter.initial_life = 2.0f;
     result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
     result.emitter.drag = 0.95f;
@@ -1066,9 +972,9 @@ Particle_System create_psys2()
 {
     Particle_System result = { };
     result.stretch = true;
-    result.emitter.life_max = 8.0f;
+    result.emitter.life = 8.0f;
     result.emitter.loop = true;
-    result.emitter.rate = 800.0f;
+    result.emitter.rate = 200.0f;
     result.emitter.initial_life = 2.0f;
     result.emitter.acceleration = vec3{0.0f, 5.5f, 0.0f};
     //result.emitter.drag = 0.95;
@@ -1118,7 +1024,7 @@ Particle_System create_psys3()
 {
     Particle_System result = { };
     result.stretch = false;
-    result.emitter.life_max = 8.0f;
+    result.emitter.life = 8.0f;
     result.emitter.loop = true;
     result.emitter.rate = 800.0f;
     result.emitter.initial_life = 2.0f;
@@ -1162,6 +1068,7 @@ Particle_System create_psys3()
     //exit(0);
     return result;
 }
+
 struct Particle_DrawBuffer
 {
     int cap;
@@ -1270,7 +1177,7 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
 
 void draw_to_buffer(Particle_DrawBuffer *buffer, Camera camera, Particle_System *PS, Emitter_Instance *E)
 {
-    Particles *P = &E->P[(E->frame + 1) & 1];
+    Particles *P = &E->P[(E->frame + 1) & EMITTER_FRAME_MASK];
 
     mat4 view_mat = camera_matrix(camera);
     vec3 right = {view_mat[0], view_mat[1], view_mat[2]};
@@ -1317,20 +1224,9 @@ void draw_particle_buffer_particle(Particle_DrawBuffer *buffer, uint32_t i)
 
 #include <algorithm>
 
-void draw_particle_buffer(Particle_DrawBuffer *buffer, Camera camera, int width, int height)
+void draw_particle_buffer(Particle_DrawBuffer *buffer, GLuint texture)
 {
     std::sort(buffer->sort_key, buffer->sort_key + buffer->size);
-
-    mat4 camera_proj = Perspective_lh(90.0f, (float)width / (float)height, 0.1f, 1000.0f);
-    camera_proj = transpose(camera_proj);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadMatrixf(camera_proj.m);
-
-    mat4 view_mat = camera_matrix(camera);
-    view_mat = transpose(view_mat);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadMatrixf(view_mat.m);
 
     /*
     if (PS->additive)
@@ -1347,6 +1243,7 @@ void draw_particle_buffer(Particle_DrawBuffer *buffer, Camera camera, int width,
     }
 
     glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texture);
 
     glBegin(GL_TRIANGLES);
     for (int i = 0; i < buffer->size; i++)
@@ -1357,8 +1254,64 @@ void draw_particle_buffer(Particle_DrawBuffer *buffer, Camera camera, int width,
         draw_particle_buffer_particle(buffer, index);
     }
     glEnd();
+}
+
+void draw_floor(GLuint texture)
+{
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    float sz = 5.0f;
+    float tc = 10.0f;
+
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_TRIANGLES);
+    glTexCoord2f(0.0f, 0.0f);
+    glVertex3f(-sz, 0.0f, -sz);
+    glTexCoord2f(tc, 0.0f);
+    glVertex3f(sz, 0.0f, -sz);
+    glTexCoord2f(tc, tc);
+    glVertex3f(sz, 0.0f, sz);
+
+    glTexCoord2f(0.0f, 0.0f);
+    glVertex3f(-sz, 0.0f, -sz);
+    glTexCoord2f(tc, tc);
+    glVertex3f(sz, 0.0f, sz);
+    glTexCoord2f(0.0f, tc);
+    glVertex3f(-sz, 0.0f, sz);
+    glEnd();
+}
+
+void draw(Particle_DrawBuffer *buffer, GLuint particle_tex, GLuint floor_tex, Camera camera, int width, int height)
+{
+    mat4 camera_proj = Perspective_lh(90.0f, (float)width / (float)height, 0.1f, 1000.0f);
+    camera_proj = transpose(camera_proj);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixf(camera_proj.m);
+
+    mat4 view_mat = camera_matrix(camera);
+    view_mat = transpose(view_mat);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(view_mat.m);
+
+    draw_floor(floor_tex);
+
+    draw_particle_buffer(buffer, particle_tex);
 
     glDisable(GL_TEXTURE_2D);
+
+    glBegin(GL_LINES);
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(1.0f, 0.0f, 0.0f);
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 1.0f, 0.0f);
+    glColor3f(0.0f, 0.0f, 1.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 1.0f);
+    glEnd();
 }
 
 
@@ -1449,9 +1402,9 @@ void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look, bool str
     glVertex3fv(&w_pos3.x);
 }
 
-void draw(Camera camera, int width, int height, Particle_System *PS, Emitter_Instance *E)
+void draw_old(Camera camera, int width, int height, Particle_System *PS, Emitter_Instance *E)
 {
-    Particles *P = &E->P[(E->frame + 1) & 1];
+    Particles *P = &E->P[(E->frame + 1) & EMITTER_FRAME_MASK];
 
     mat4 camera_proj = Perspective_lh(90.0f, (float)width / (float)height, 0.1f, 1000.0f);
     camera_proj = transpose(camera_proj);
@@ -1527,17 +1480,20 @@ struct StringRef
     int len;
 };
 
-bool str_equals(StringRef s1, const char *s2)
+bool str_equals(StringRef str, const char *s2)
 {
-    int len = 0;
-    while (s2[0] != '\0' && len < s1.len)
+    int len = strlen(s2);
+    if (len != str.len) return false;
+
+    const char *s1 = str.s;
+    while (s2[0] != '\0')
     {
-        if (s1.s[len] != s2[0]) return false;
+        if (s1[0] != s2[0]) return false;
         s2++;
-        len++;
+        s1++;
     }
 
-    return (len == s1.len);
+    return true;
 }
 
 bool skip_whitespace(const char *&p, const char *end)
@@ -1653,6 +1609,48 @@ StringRef read_value(const char *&p, const char *file_end, Attribute_ValueType *
 {
     switch (p[0])
     {
+    case 't':
+        {
+            *type = ATTR_BOOLEAN;
+            const char *start = p;
+            while (p < file_end)
+            {
+                if (p[0] == ' ' || p[0] == '\n' || p[0] == '\r' || p[0] == '\t')
+                {
+                    break;
+                }
+                p++;
+            }
+            int len = p - start;
+            StringRef result = {start, len};
+            if (!str_equals(result, "true"))
+            {
+                printf("Error: expected true value\n");
+                return { };
+            }
+            return result;
+        } break;
+    case 'f':
+        {
+            *type = ATTR_BOOLEAN;
+            const char *start = p;
+            while (p < file_end)
+            {
+                if (p[0] == ' ' || p[0] == '\n' || p[0] == '\r' || p[0] == '\t')
+                {
+                    break;
+                }
+                p++;
+            }
+            int len = p - start;
+            StringRef result = {start, len};
+            if (!str_equals(result, "false"))
+            {
+                printf("Error: expected false value\n");
+                return { };
+            }
+            return result;
+        } break;
     case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
         {
             *type = ATTR_F1;
@@ -1747,14 +1745,15 @@ Particle_System load_particle_system(const char *filename)
 {
     Particle_System result = { };
     result.stretch = false;
-    result.emitter.life_max = 8.0f;
+    result.emitter.life = 8.0f;
+    result.emitter.cooldown = 2.0f;
     result.emitter.loop = true;
-    result.emitter.rate = 800.0f;
+    result.emitter.rate = 200.0f;
     result.emitter.initial_life = 2.0f;
     result.emitter.acceleration = vec3{0.0f, 0.0f, 0.0f};
     result.emitter.drag = 0.95f;
     result.emitter.initial_velocity = vec3{0.0f, 1.0f, 0.0f};
-    result.size = 1.2f;
+    result.size = 0.2f;
     result.color = vec4{1, 1, 1, 1};
 
     //return result;
@@ -1775,8 +1774,8 @@ Particle_System load_particle_system(const char *filename)
         FXVM_Program *p_value;
         bool *b_value;
     } emitter_attribute_map[EMITTER_ATTRIBUTE_NUM] = {
-        {"emitter_life_max", ATTR_BOOLEAN, &result.emitter.life_max, nullptr, nullptr},
-        {"emitter_loop", ATTR_F1, nullptr, nullptr, &result.emitter.loop},
+        {"emitter_loop", ATTR_BOOLEAN, nullptr, nullptr, &result.emitter.loop},
+        {"emitter_life", ATTR_F1, &result.emitter.life, nullptr, nullptr},
         {"emitter_rate", ATTR_F1, &result.emitter.rate, &result.emitter.rate_p, nullptr},
         {"drag", ATTR_F1, &result.emitter.drag, &result.emitter.drag_p, nullptr},
         {"initial_life", ATTR_F1, &result.emitter.initial_life, &result.emitter.initial_life_p, nullptr},
@@ -1821,12 +1820,12 @@ Particle_System load_particle_system(const char *filename)
             goto err;
         }
 
-        printf("Got attribute %.5s\n", attribute.s);
-
         Attribute_ValueType type;
         StringRef value = read_value(p, file_end, &type);
-
-        printf("Got value %.17s type %d\n", value.s, type);
+        if (!value.s)
+        {
+            goto err;
+        }
 
         bool emitter_attrib_found = false;
         for (int i = 0; i < EMITTER_ATTRIBUTE_NUM; i++)
@@ -1839,7 +1838,7 @@ Particle_System load_particle_system(const char *filename)
                 {
                 case ATTR_BOOLEAN:
                     {
-                        if (!attrib.b_value)
+                        if (!attrib.b_value || attrib.type != type)
                         {
                             printf("Error: no boolean value allowed for %s\n", attrib.name);
                             goto err;
@@ -1848,7 +1847,7 @@ Particle_System load_particle_system(const char *filename)
                     } break;
                 case ATTR_F1:
                     {
-                        if (!attrib.value)
+                        if (!attrib.value || attrib.type != type)
                         {
                             printf("Error: no scalar value allowed for %s\n", attrib.name);
                             goto err;
@@ -1857,7 +1856,7 @@ Particle_System load_particle_system(const char *filename)
                     } break;
                 case ATTR_F2:
                     {
-                        if (!attrib.value)
+                        if (!attrib.value || attrib.type != type)
                         {
                             printf("Error: no vec2 value allowed for %s\n", attrib.name);
                             goto err;
@@ -1866,7 +1865,7 @@ Particle_System load_particle_system(const char *filename)
                     } break;
                 case ATTR_F3:
                     {
-                        if (!attrib.value)
+                        if (!attrib.value || attrib.type != type)
                         {
                             printf("Error: no vec3 value allowed for %s\n", attrib.name);
                             goto err;
@@ -1875,7 +1874,7 @@ Particle_System load_particle_system(const char *filename)
                     } break;
                 case ATTR_F4:
                     {
-                        if (!attrib.value)
+                        if (!attrib.value || attrib.type != type)
                         {
                             printf("Error: no vec4 value allowed for %s\n", attrib.name);
                             goto err;
@@ -1884,7 +1883,7 @@ Particle_System load_particle_system(const char *filename)
                     } break;
                 case ATTR_PROGRAM:
                     {
-                        if (!attrib.p_value)
+                        if (!attrib.p_value) // TODO: type check
                         {
                             printf("Error: no program value allowed for %s\n", attrib.name);
                             goto err;
@@ -1975,6 +1974,7 @@ Particle_System load_particle_system(const char *filename)
     return result;
 
 err:
+    fflush(stdout);
     free((void*)file_str);
     return { };
 }
@@ -1998,47 +1998,52 @@ void key_up(int key, bool *keys)
 
 void (__stdcall *glGenerateMipmap)(GLenum);
 
+GLuint make_floor_texture()
+{
+    uint8_t lo = 40;
+    uint8_t hi = 80;
+    uint8_t tex_data[16] = {
+        hi, hi, hi, 255, lo, lo, lo, 255,
+        lo, lo, lo, 255, hi, hi, hi, 255,
+    };
+
+    glGenerateMipmap = (void (*)(GLenum))(void*)wglGetProcAddress("glGenerateMipmap");
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D,
+            0, // level
+            GL_RGBA,
+            2,
+            2,
+            0, // border
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            tex_data
+            );
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    return texture;
+}
+
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
     Window window = { };
     create_window(1000, 800, &window);
 
+    // After GL context is created
+    glGenerateMipmap = (void (*)(GLenum))(void*)wglGetProcAddress("glGenerateMipmap");
+
     glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
 
-    /*
-    uint8_t tex_data[64] = {
-        0, 1,  1,   2,   2,  1, 1, 0,
-        1, 4,  8,   8,   8,  8, 4, 1,
-        1, 8, 16,  32,  32, 16, 8, 1,
-        2, 8, 32, 128, 192, 48, 8, 2,
-        2, 8, 48, 192, 128, 32, 8, 2,
-        1, 8, 16,  32,  32, 16, 8, 1,
-        1, 4,  8,   8,   8,  8, 4, 1,
-        0, 1,  1,   2,   2,  1, 1, 0,
-    };
-    uint8_t tex_data[64] = {
-        0,   1,   1,   4,  32,   2,  1,  0,
-        1,   8,   8,  16,  64,  16,  8,  1,
-        1,   8,   8,  32, 128,  32, 16,  2,
-        4,  16,  32, 190, 192, 128, 64, 32,
-        32, 64, 128, 192, 190,  32, 16,  4,
-        2,  16,  32, 128,  32,   8,  8,  1,
-        1,   8,  16,  64,  16,   8,  8,  1,
-        0,   1,   2,  32,   4,   1,  1,  0,
-    };
-    */
-
-    //uint8_t tex_data[128] = {
-    //    0,  0,   1,  1,   1,   1,   4,   4,  32,  32,   2,   2,  1,  1,  0,  0,
-    //    1,  1,   8,  8,   8,   8,  16,  16,  64,  64,  16,  16,  8,  8,  1,  1,
-    //    1,  1,   8,  8,   8,   8,  32,  32, 128, 128,  32,  32, 16, 16,  2,  2,
-    //    4,  4,  16, 16,  32,  32, 190, 190, 192, 192, 128, 128, 64, 64, 32, 32,
-    //    32, 32, 64, 64, 128, 128, 192, 192, 190, 190,  32,  32, 16, 16,  4,  4,
-    //    2,  2,  16, 16,  32,  32, 128, 128,  32,  32,   8,   8,  8,  8,  1,  1,
-    //    1,  1,   8,  8,  16,  16,  64,  64,  16,  16,   8,   8,  8,  8,  1,  1,
-    //    0,  0,   1,  1,   2,   2,  32,  32,   4,   4,   1,   1,  1,  1,  0,  0,
-    //};
+    GLuint floor_tex = make_floor_texture();
 
     uint8_t tex_data[128] = {
         255,  2, 255,  4, 255,   8, 255,  16, 255,  16, 255,   8, 255,  4, 255,  2,
@@ -2050,8 +2055,6 @@ int main(int argc, char **argv)
         255,  4, 255,  8, 255,  16, 255,  32, 255,  32, 255,  16, 255,  8, 255,  4,
         255,  2, 255,  4, 255,   8, 255,  16, 255,  16, 255,   8, 255,  4, 255,  2,
     };
-
-    glGenerateMipmap = (void (*)(GLenum))(void*)wglGetProcAddress("glGenerateMipmap");
 
     GLuint particle_tex;
     glGenTextures(1, &particle_tex);
@@ -2071,10 +2074,12 @@ int main(int argc, char **argv)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glGenerateMipmap(GL_TEXTURE_2D);
 
-    Particle_System PS1 = load_psys();
+    //Particle_System PS1 = load_psys();
+    Particle_System PS1 = load_particle_system("particle_systems/example.psys");
     Emitter_Instance E1 = new_emitter(&PS1, vec3{0, 0, 0});
 
-    Particle_System PS2 = create_psys2();
+    //Particle_System PS2 = create_psys2();
+    Particle_System PS2 = load_particle_system("particle_systems/explosion.psys");
     Emitter_Instance E2 = new_emitter(&PS2, vec3{2, 0, 0});
 
     //Particle_System PS3 = create_psys3();
@@ -2147,7 +2152,7 @@ int main(int argc, char **argv)
         if (!last_K && keys['K'])
         {
             free_particle_system(&PS2);
-            PS2 = load_particle_system("particle_systems/simple.psys");
+            PS2 = load_particle_system("particle_systems/explosion.psys");
         }
         if (!last_L && keys['L'])
         {
@@ -2172,9 +2177,9 @@ int main(int argc, char **argv)
         while (time_accum >= sim_dt)
         {
             uint64_t start_cycles = __rdtsc(), emit_cycles = 0, compact_cycles = 0;
-            simulate(&vm, &PS1, &E1, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
-            simulate(&vm, &PS2, &E2, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
-            simulate(&vm, &PS3, &E3, sim_dt * 0.125f * 1, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS1, &E1, sim_dt, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS2, &E2, sim_dt, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS3, &E3, sim_dt, &emit_cycles, &compact_cycles);
             uint64_t end_cycles = __rdtsc();
 
             sim_emit_ticks = emit_cycles;
@@ -2194,7 +2199,7 @@ int main(int argc, char **argv)
         draw_to_buffer(&particle_buffer, camera, &PS1, &E1);
         draw_to_buffer(&particle_buffer, camera, &PS2, &E2);
         draw_to_buffer(&particle_buffer, camera, &PS3, &E3);
-        draw_particle_buffer(&particle_buffer, camera, window.width, window.height);
+        draw(&particle_buffer, particle_tex, floor_tex, camera, window.width, window.height);
 
         //draw(camera, window.width, window.height, &PS1, &E1);
         //draw(camera, window.width, window.height, &PS2, &E2);

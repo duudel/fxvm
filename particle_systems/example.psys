@@ -1,12 +1,13 @@
 
 emitter_life = 1.0
+emitter_loop = true
 
 emitter_rate = {{
-    50.0;
+    100.0;
 }}
 
 initial_life = {{
-    0.5;
+    0.25;
 }}
 
 drag = 5.0
@@ -38,9 +39,9 @@ size = {{
     e = emitter_life;
     x = particle_random.x;
     t = particle_life;
-    i = 1 - t;
-    //t = 1 - i * i * i * i * i;
-    t = exp(-i);
+    //i = 1 - t;
+    ////t = 1 - i * i * i * i * i;
+    //t = exp(-i);
     0.3 + 0.3 * x * t + lerp(0.3, 0.0, abs(e-0.5)*2);
 }}
 
