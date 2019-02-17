@@ -451,19 +451,14 @@ struct Particles
 };
 
 
-enum { EMITTER_FRAME_MASK = 0 };
 struct Emitter_Instance
 {
     float fractional_particles;
     float life;
     vec3 position;
 
-    int last_index;
-
     int particles_alive;
-    Particles P[2];
-
-    int frame;
+    Particles P;
 };
 
 struct Emitter_Parameters
@@ -537,7 +532,6 @@ Emitter_Instance new_emitter(Particle_System *PS, vec3 position)
 {
     (void)PS;
     Emitter_Instance result = { };
-    result.life = 0.0f; //PS->emitter.life;
     result.position = position;
     return result;
 }
@@ -547,7 +541,6 @@ float get_emitter_life(Emitter_Parameters *EP, Emitter_Instance *E)
     float max_life = ((EP->life >= 0.001f) ? EP->life : 1.0f);
     float life10 = E->life / max_life;
     return clamp01(life10);
-    //return clamp01(1.0f - life10);
 }
 
 #include <intrin.h> // for rtdsc
@@ -622,39 +615,35 @@ void eval_f4(FXVM_Machine *vm, vec4 *dest, int instance_index, int instance_coun
 
 void compact(Emitter_Instance *E)
 {
-    Particles *P0 = &E->P[E->frame];
-    Particles *P1 = &E->P[(E->frame + 1) & EMITTER_FRAME_MASK];
+    Particles *P = &E->P;
 
     int j = 0;
     for (int i = 0; i < E->particles_alive; )
     {
-        while (/*i < Particles::MAX &&*/ P1->life_seconds[i] <= 0.01f)
+        while (P->life_seconds[i] <= 0.01f)
         {
             i++;
         }
-        //if (i < Particles::MAX)
-        if (P1->life_seconds[i] > 0.01f)
-        if (i < E->particles_alive)
+        if ((i < E->particles_alive) &&
+            (P->life_seconds[i] > 0.01f))
         {
-            P0->life_seconds[j] = P1->life_seconds[i];
-            P0->life_max[j] = P1->life_max[i];
-            P0->position[j] = P1->position[i];
-            P0->velocity[j] = P1->velocity[i];
-            P0->acceleration[j] = P1->acceleration[i];
-            P0->size[j] = P1->size[i];
-            P0->color[j] = P1->color[i];
-            P0->random[j] = P1->random[i];
+            P->life_seconds[j] = P->life_seconds[i];
+            P->life_max[j] = P->life_max[i];
+            P->position[j] = P->position[i];
+            P->velocity[j] = P->velocity[i];
+            P->acceleration[j] = P->acceleration[i];
+            P->size[j] = P->size[i];
+            P->color[j] = P->color[i];
+            P->random[j] = P->random[i];
             i++, j++;
         }
     }
-    //if (j == 1) printf("PS alive %d\n", E->particles_alive);
     E->particles_alive = j;
 }
 
 void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
 {
-    //Particles *P = &E->P[E->frame & 1];
-    Particles *P = &E->P[(E->frame+1) & EMITTER_FRAME_MASK];
+    Particles *P = &E->P;
 
     float emitter_life = get_emitter_life(&PS->emitter, E);
     set_uniform_f1(&PS->emitter.rate_p, PS->emitter.life_i, &emitter_life);
@@ -711,14 +700,6 @@ void emit(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt)
     E->particles_alive = index;
 }
 
-template <class T>
-void swap(T &a, T &b)
-{
-    T temp = a;
-    a = b;
-    b = temp;
-}
-
 void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float dt, uint64_t *emit_cycles, uint64_t *compact_cycles)
 {
     uint64_t start_cycles = __rdtsc();
@@ -741,7 +722,7 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
     end_cycles = __rdtsc();
     *emit_cycles += end_cycles - start_cycles;
 
-    Particles *P = &E->P[E->frame & EMITTER_FRAME_MASK];
+    Particles *P = &E->P;
 
     float drag = PS->emitter.drag;
     float emitter_life = get_emitter_life(&PS->emitter, E);
@@ -834,8 +815,6 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
             eval_f4<16>(vm, &P->color[i], i, last_group, &PS->color_p);
         }
     }
-
-    E->frame = (E->frame + 1) & EMITTER_FRAME_MASK;
 }
 
 struct Camera
@@ -1177,7 +1156,7 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
 
 void draw_to_buffer(Particle_DrawBuffer *buffer, Camera camera, Particle_System *PS, Emitter_Instance *E)
 {
-    Particles *P = &E->P[(E->frame + 1) & EMITTER_FRAME_MASK];
+    Particles *P = &E->P;
 
     mat4 view_mat = camera_matrix(camera);
     vec3 right = {view_mat[0], view_mat[1], view_mat[2]};
@@ -1404,7 +1383,7 @@ void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look, bool str
 
 void draw_old(Camera camera, int width, int height, Particle_System *PS, Emitter_Instance *E)
 {
-    Particles *P = &E->P[(E->frame + 1) & EMITTER_FRAME_MASK];
+    Particles *P = &E->P;
 
     mat4 camera_proj = Perspective_lh(90.0f, (float)width / (float)height, 0.1f, 1000.0f);
     camera_proj = transpose(camera_proj);
