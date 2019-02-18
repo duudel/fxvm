@@ -1,4 +1,7 @@
 
+sheet_tile_x = 1
+sheet_tile_y = 0
+
 emitter_rate = 100.0
 
 drag = 1

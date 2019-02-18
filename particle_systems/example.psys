@@ -1,5 +1,7 @@
 
 additive = true
+sheet_tile_x = 0
+sheet_tile_y = 1
 
 emitter_life = 1.0
 emitter_loop = true

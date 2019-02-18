@@ -1,5 +1,7 @@
 
 stretch = false
+sheet_tile_x = 3
+sheet_tile_y = 0
 
 emitter_life = 0.20
 emitter_cooldown = 1.0

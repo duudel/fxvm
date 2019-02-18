@@ -1,6 +1,8 @@
 
 stretch = true
 additive = true
+sheet_tile_x = 1
+sheet_tile_y = 0
 
 emitter_life = 0.20
 emitter_cooldown = 1.0
@@ -39,8 +41,8 @@ acceleration = {{
 
 color = {{
     t = particle_life;
-    lerp(vec4(1, 0.8, 0.2, 1.0), vec4(0.5, 0.4, 0.5, 0.0), t);
-    //lerp(vec4(0.75, 1.0, 0.6, 1.0), vec4(0.1, 0.4, 0.1, 0.0), t);
+    //lerp(vec4(1, 0.8, 0.2, 1.0), vec4(0.5, 0.4, 0.5, 0.0), t);
+    lerp(vec4(1, 0.8, 0.2, 1.0), vec4(0.8, 0.4, 0.2, 0.0), t);
 }}
 
 size = {{
