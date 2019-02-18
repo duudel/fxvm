@@ -494,6 +494,8 @@ struct Particle_System
     Emitter_Parameters emitter;
     bool stretch;
     bool additive;
+    int sheet_tile_x;
+    int sheet_tile_y;
 
     vec3 acceleration;
     FXVM_Program acceleration_p;
@@ -545,23 +547,6 @@ float get_emitter_life(Emitter_Parameters *EP, Emitter_Instance *E)
 }
 
 #include <intrin.h> // for rtdsc
-
-
-//float eval_f1(FXVM_Machine *vm, float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
-//{
-//    FXVM_State state = { };
-//    exec(vm, state, input, attributes, instance_index, &bytecode);
-//    exec(vm, state, instance_index, &bytecode);
-//    return state.r[0].v[0];
-//}
-
-//vec3 eval_f3(FXVM_Machine *vm, float *input, float **attributes, int instance_index, FXVM_Bytecode bytecode)
-//{
-//    FXVM_State state = { };
-//    exec(vm, state, input, attributes, instance_index, &bytecode);
-//    auto r = state.r[0];
-//    return vec3{r.v[0], r.v[1], r.v[2]};
-//}
 
 float eval_f1(FXVM_Machine *vm, int instance_index, FXVM_Program *program)
 {
@@ -1059,6 +1044,7 @@ struct Particle_DrawBuffer
     vec3 *h0;
     vec3 *h1;
     vec4 *color;
+    uint16_t *sheet_tile_index;
     bool *additive;
 };
 
@@ -1072,6 +1058,7 @@ int add_particle_buffer_particle(Particle_DrawBuffer *buffer)
         buffer->h0 = (vec3*)realloc(buffer->h0, sizeof(vec3) * new_cap);
         buffer->h1 = (vec3*)realloc(buffer->h1, sizeof(vec3) * new_cap);
         buffer->color = (vec4*)realloc(buffer->color, sizeof(vec4) * new_cap);
+        buffer->sheet_tile_index = (uint16_t*)realloc(buffer->sheet_tile_index, sizeof(uint16_t) * new_cap);
         buffer->additive = (bool*)realloc(buffer->additive, sizeof(bool) * new_cap);
         buffer->cap = new_cap;
     }
@@ -1081,7 +1068,9 @@ int add_particle_buffer_particle(Particle_DrawBuffer *buffer)
     return i;
 }
 
-void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, int i, mat4 view_mat, vec3 right, vec3 up, vec3 look, bool stretch, bool additive)
+void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, int i,
+        mat4 view_mat, vec3 right, vec3 up, vec3 look,
+        bool stretch, bool additive, int tile_x, int tile_y)
 {
     int bi = add_particle_buffer_particle(buffer);
 
@@ -1165,6 +1154,7 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
     buffer->h0[bi] = h0;
     buffer->h1[bi] = h1;
     buffer->color[bi] = P->color[i];
+    buffer->sheet_tile_index[bi] = tile_x | (tile_y << 8);
 }
 
 void draw_to_buffer(Particle_DrawBuffer *buffer, Camera camera, Particle_System *PS, Emitter_Instance *E)
@@ -1178,7 +1168,10 @@ void draw_to_buffer(Particle_DrawBuffer *buffer, Camera camera, Particle_System 
 
     for (int i = 0; i < E->particles_alive; i++)
     {
-        emit_particle_buffer_particle(buffer, P, i, view_mat, right, up, look, PS->stretch, PS->additive);
+        emit_particle_buffer_particle(buffer, P, i,
+                view_mat, right, up, look,
+                PS->stretch, PS->additive,
+                PS->sheet_tile_x, PS->sheet_tile_y);
     }
 }
 
@@ -1187,7 +1180,8 @@ void reset_particle_buffer(Particle_DrawBuffer *buffer)
     buffer->size = 0;
 }
 
-void draw_particle_buffer_particle(Particle_DrawBuffer *buffer, uint32_t i)
+void draw_particle_buffer_particle(Particle_DrawBuffer *buffer, uint32_t i,
+        float tx0, float ty0, float tx1, float ty1)
 {
     vec3 w_pos = buffer->P[i];
     vec3 h0 = buffer->h0[i];
@@ -1200,28 +1194,39 @@ void draw_particle_buffer_particle(Particle_DrawBuffer *buffer, uint32_t i)
     vec3 w_pos3 = w_pos + h0 - h1;
 
     glColor4f(color.x, color.y, color.z, color.w);
-    glTexCoord2f(0.0f, 0.0f);
+    glTexCoord2f(tx0, ty0);
     glVertex3fv(&w_pos0.x);
-    glTexCoord2f(0.0f, 1.0f);
+    glTexCoord2f(tx0, ty1);
     glVertex3fv(&w_pos1.x);
-    glTexCoord2f(1.0f, 1.0f);
+    glTexCoord2f(tx1, ty1);
     glVertex3fv(&w_pos2.x);
-    glTexCoord2f(0.0f, 0.0f);
+    glTexCoord2f(tx0, ty0);
     glVertex3fv(&w_pos0.x);
-    glTexCoord2f(1.0f, 1.0f);
+    glTexCoord2f(tx1, ty1);
     glVertex3fv(&w_pos2.x);
-    glTexCoord2f(1.0f, 0.0f);
+    glTexCoord2f(tx1, ty0);
     glVertex3fv(&w_pos3.x);
 }
 
+struct ParticleSheet
+{
+    GLuint texture;
+    int width;
+    int height;
+    int tile_size; // tiles are square
+};
+
 #include <algorithm>
 
-void draw_particle_buffer(Particle_DrawBuffer *buffer, GLuint texture)
+void draw_particle_buffer(Particle_DrawBuffer *buffer, ParticleSheet sheet)
 {
     std::sort(buffer->sort_key, buffer->sort_key + buffer->size);
 
+    float tw = (float)sheet.tile_size / (float)sheet.width;
+    float th = (float)sheet.tile_size / (float)sheet.height;
+
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texture);
+    glBindTexture(GL_TEXTURE_2D, sheet.texture);
 
     glEnable(GL_BLEND);
     //glBlendFunc(GL_ONE, GL_ONE);
@@ -1233,6 +1238,17 @@ void draw_particle_buffer(Particle_DrawBuffer *buffer, GLuint texture)
     {
         uint32_t key = buffer->sort_key[i];
         uint32_t index = key & 0xffff;
+
+        uint16_t tile_index = buffer->sheet_tile_index[index];
+        uint8_t tile_x = tile_index & 0xff;
+        uint8_t tile_y = (tile_index >> 8) & 0xff;
+
+        float tx0 = tw * tile_x;
+        float ty0 = th * tile_y;
+        float tx1 = tx0 + tw;
+        float ty1 = ty0 + th;
+        ty0 = 1.0f - ty0;
+        ty1 = 1.0f - ty1;
 
         if (buffer->additive[index] != additive_on)
         {
@@ -1250,7 +1266,7 @@ void draw_particle_buffer(Particle_DrawBuffer *buffer, GLuint texture)
             glBegin(GL_TRIANGLES);
         }
 
-        draw_particle_buffer_particle(buffer, index);
+        draw_particle_buffer_particle(buffer, index, tx0, ty0, tx1, ty1);
     }
     glEnd();
 
@@ -1283,7 +1299,7 @@ void draw_floor(GLuint texture)
     glEnd();
 }
 
-void draw(Particle_DrawBuffer *buffer, GLuint particle_tex, GLuint floor_tex, Camera camera, int width, int height)
+void draw(Particle_DrawBuffer *buffer, ParticleSheet particle_sheet, GLuint floor_tex, Camera camera, int width, int height)
 {
     mat4 camera_proj = Perspective_lh(90.0f, (float)width / (float)height, 0.1f, 1000.0f);
     camera_proj = transpose(camera_proj);
@@ -1298,7 +1314,7 @@ void draw(Particle_DrawBuffer *buffer, GLuint particle_tex, GLuint floor_tex, Ca
 
     draw_floor(floor_tex);
 
-    draw_particle_buffer(buffer, particle_tex);
+    draw_particle_buffer(buffer, particle_sheet);
 
     glDisable(GL_TEXTURE_2D);
 
@@ -1315,94 +1331,6 @@ void draw(Particle_DrawBuffer *buffer, GLuint particle_tex, GLuint floor_tex, Ca
     glEnd();
 }
 
-
-// OLD
-void draw_particle(Particles *P, int i, vec3 right, vec3 up, vec3 look, bool stretch)
-{
-    float size = P->size[i] * 0.5f;
-
-    vec3 w_pos = P->position[i];
-    vec3 w_vel = P->velocity[i];
-
-    vec3 w_pos0;
-    vec3 w_pos1;
-    vec3 w_pos2;
-    vec3 w_pos3;
-
-    if (stretch)
-    {
-        vec3 e3 = look;
-        vec3 v = normalize(w_vel);
-        //vec3 hh0 = normalize(w_vel - e3 * dot(w_vel, e3));
-        //vec3 hh1 = normalize(cross(hh0, e3));
-        vec3 hh0 = w_vel; //normalize(w_vel - e3 * dot(w_vel, e3));
-        vec3 hh1 = normalize(cross(v, e3));
-        vec3 hh12 = normalize(cross(v, up));
-
-        float kk = dot(look, v);
-        kk *= kk;
-        kk *= kk;
-        kk *= kk;
-        hh1 = lerp(hh1, hh12, kk*kk);
-
-        vec3 h0 = hh0 * size;
-        vec3 h1 = hh1 * size;
-
-        float k = dot(look, v) * 0.9f;
-        k *= k;
-        k *= k;
-
-        k = 0.0f;
-
-        vec3 v_vel_x = w_vel - e3 * dot(w_vel, e3);
-        float t = dot(v_vel_x, v_vel_x);
-        vec3 v_vel = lerp(right, normalize(v_vel_x), t > 0.1f ? 1.0f : t * 10.0f);
-        vec3 vv0 = v_vel;
-        vec3 vv1 = normalize(cross(v_vel, e3));
-
-        vec3 v0 = vv0 * size;
-        vec3 v1 = vv1 * size;
-
-        h0 = lerp(h0, v0, k);
-        h1 = lerp(h1, v1, k);
-
-        //h0 = lerp(h0, right * size, k);
-        //h1 = lerp(h1, up * size, k);
-
-        //w_pos0 = w_pos - h0 - h1;
-        //w_pos1 = w_pos - h0;
-        //w_pos2 = w_pos + h0;
-        //w_pos3 = w_pos + h0 - h1;
-        w_pos0 = w_pos - h0 - h1;
-        w_pos1 = w_pos - h0 + h1;
-        w_pos2 = w_pos + h0 + h1;
-        w_pos3 = w_pos + h0 - h1;
-    }
-    else
-    {
-        vec3 h0 = right * size;
-        vec3 h1 = up * size;
-
-        w_pos0 = w_pos - h0 - h1;
-        w_pos1 = w_pos - h0 + h1;
-        w_pos2 = w_pos + h0 + h1;
-        w_pos3 = w_pos + h0 - h1;
-    }
-
-    glColor4f(P->color[i].x, P->color[i].y, P->color[i].z, P->color[i].w);
-    glTexCoord2f(0.0f, 0.0f);
-    glVertex3fv(&w_pos0.x);
-    glTexCoord2f(0.0f, 1.0f);
-    glVertex3fv(&w_pos1.x);
-    glTexCoord2f(1.0f, 1.0f);
-    glVertex3fv(&w_pos2.x);
-    glTexCoord2f(0.0f, 0.0f);
-    glVertex3fv(&w_pos0.x);
-    glTexCoord2f(1.0f, 1.0f);
-    glVertex3fv(&w_pos2.x);
-    glTexCoord2f(1.0f, 0.0f);
-    glVertex3fv(&w_pos3.x);
-}
 
 const char* read_file(const char *filename, int *len)
 {
@@ -1713,7 +1641,10 @@ Particle_System load_particle_system(const char *filename)
     const char *file_end = file_str + file_len;
     const char *p = file_str;
 
-    enum { EMITTER_ATTRIBUTE_NUM = 10, PARTICLE_ATTRIBUTE_NUM = 3 };
+    float sheet_tile_x = 0.0f;
+    float sheet_tile_y = 0.0f;
+
+    enum { EMITTER_ATTRIBUTE_NUM = 12, PARTICLE_ATTRIBUTE_NUM = 3 };
     struct {
         const char *name;
         Attribute_ValueType type;
@@ -1723,6 +1654,8 @@ Particle_System load_particle_system(const char *filename)
     } emitter_attribute_map[EMITTER_ATTRIBUTE_NUM] = {
         {"stretch", ATTR_BOOLEAN, nullptr, nullptr, &result.stretch},
         {"additive", ATTR_BOOLEAN, nullptr, nullptr, &result.additive},
+        {"sheet_tile_x", ATTR_F1, &sheet_tile_x, nullptr, nullptr},
+        {"sheet_tile_y", ATTR_F1, &sheet_tile_y, nullptr, nullptr},
         {"emitter_loop", ATTR_BOOLEAN, nullptr, nullptr, &result.emitter.loop},
         {"emitter_life", ATTR_F1, &result.emitter.life, nullptr, nullptr},
         {"emitter_cooldown", ATTR_F1, &result.emitter.cooldown, nullptr, nullptr},
@@ -1920,6 +1853,9 @@ Particle_System load_particle_system(const char *filename)
         goto err;
     }
 
+    result.sheet_tile_x = (int)sheet_tile_x;
+    result.sheet_tile_y = (int)sheet_tile_y;
+
     free((void*)file_str);
     return result;
 
@@ -2028,6 +1964,78 @@ GLuint make_particle_texture()
     return texture;
 }
 
+#include <FreeImage.h>
+
+ParticleSheet load_particle_sheet(const char *filepath, int tile_size)
+{
+    FreeImage_Initialise();
+    FREE_IMAGE_FORMAT format = FreeImage_GetFIFFromFilename(filepath);
+    FIBITMAP *bitmap = FreeImage_Load(format, filepath);
+    if (!bitmap)
+    {
+        printf("Error: particle sheet image not found: %s\n", filepath);
+        exit(0);
+        return { };
+    }
+
+    FREE_IMAGE_TYPE image_type = FreeImage_GetImageType(bitmap);
+
+    int bpp = FreeImage_GetBPP(bitmap);
+
+    int width = FreeImage_GetWidth(bitmap);
+    int height = FreeImage_GetHeight(bitmap);
+
+    printf("image_type %d, size %dx%d bits %d\n", image_type, width, height, bpp);
+
+    void *image_data = FreeImage_GetBits(bitmap);
+
+    GLenum gl_type = GL_UNSIGNED_BYTE;
+    GLenum gl_format = GL_RGB;
+    GLenum gl_internal_fmt = GL_RGBA;
+    if (image_type == FIT_RGB16)
+    {
+        gl_format = GL_RGB;
+        gl_type = GL_UNSIGNED_SHORT;
+    }
+    else if (image_type == FIT_RGBA16)
+    {
+        gl_format = GL_RGBA;
+        gl_type = GL_UNSIGNED_SHORT;
+    }
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D,
+            0, // level
+            gl_internal_fmt,
+            width,
+            height,
+            0, // border
+            gl_format,
+            gl_type,
+            image_data
+            );
+
+    int err = glGetError();
+    if (err)
+    {
+        printf("GL error %d\n", err);
+        exit(0);
+    }
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    ParticleSheet result = { };
+    result.texture = texture;
+    result.width = width;
+    result.height = height;
+    result.tile_size = tile_size;
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
@@ -2040,7 +2048,8 @@ int main(int argc, char **argv)
     glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
 
     GLuint floor_tex = make_floor_texture();
-    GLuint particle_tex = make_particle_texture();
+    //GLuint particle_tex = make_particle_texture();
+    ParticleSheet sheet = load_particle_sheet("particlesheet02.png", 64);
 
     //Particle_System PS1 = load_psys();
     Particle_System PS1 = load_particle_system("particle_systems/example.psys");
@@ -2182,7 +2191,7 @@ int main(int argc, char **argv)
         draw_to_buffer(&particle_buffer, camera, &PS2, &E2);
         draw_to_buffer(&particle_buffer, camera, &PS3, &E3);
         draw_to_buffer(&particle_buffer, camera, &PS4, &E4);
-        draw(&particle_buffer, particle_tex, floor_tex, camera, window.width, window.height);
+        draw(&particle_buffer, sheet, floor_tex, camera, window.width, window.height);
 
         //draw(camera, window.width, window.height, &PS1, &E1);
         //draw(camera, window.width, window.height, &PS2, &E2);
