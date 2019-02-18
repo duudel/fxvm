@@ -26,7 +26,7 @@ struct Window
     int last_mouse_y;
 
     void *wheel_user_ptr;
-    void (*mouse_wheel)(float wheel, void *user_ptr);
+    void (*mouse_wheel)(float wheel, unsigned modifiers, void *user_ptr);
 
     void *key_down_user_ptr;
     void (*key_down)(int key, void *user_ptr);
@@ -80,8 +80,9 @@ LRESULT CALLBACK WindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
         {
             int16_t wheel_w = HIWORD(wparam);
             float wheel = (float)wheel_w / WHEEL_DELTA;
+            unsigned modifiers = LOWORD(wparam);
 
-            if (window->mouse_wheel) window->mouse_wheel(wheel, window->wheel_user_ptr);
+            if (window->mouse_wheel) window->mouse_wheel(wheel, modifiers, window->wheel_user_ptr);
         } break;
     case WM_MOUSEMOVE:
         {
@@ -766,7 +767,7 @@ void simulate(FXVM_Machine *vm, Particle_System *PS, Emitter_Instance *E, float 
         if (PS->acceleration_p.bytecode.code) acceleration = P->acceleration[i];
 
         vec3 vel = P->velocity[i];
-        float v2 = -dot(vel, vel);
+        float v2 = -sqrtf(dot(vel, vel));
         vec3 Fd = normalize(vel) * v2 * drag;   // drag force
         vec3 ad = Fd;                           // drag acceleration F = ma => a = F/m; m = 1.0f => ad = Fd
         acceleration = acceleration + ad;
@@ -1097,8 +1098,9 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
         vec3 v = normalize(w_vel);
         //vec3 hh0 = normalize(w_vel - e3 * dot(w_vel, e3));
         //vec3 hh1 = normalize(cross(hh0, e3));
-        vec3 hh0 = w_vel; //normalize(w_vel - e3 * dot(w_vel, e3));
+        vec3 hh0 = v; //normalize(w_vel - e3 * dot(w_vel, e3));
         vec3 hh1 = normalize(cross(v, e3));
+#if 0
         vec3 hh12 = normalize(cross(v, up));
 
         float kk = dot(look, v);
@@ -1125,8 +1127,16 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
         vec3 v0 = vv0 * size;
         vec3 v1 = vv1 * size;
 
-        h0 = lerp(h0, v0, k);
-        h1 = lerp(h1, v1, k);
+        h0 = lerp(h0, v0, k)*0.16f;
+        h1 = lerp(h1, v1, k)*0.16f;
+#else
+        float dt = 0.016f; // 1/60 s delta time * speed = delta distance
+        float len = sqrtf(dot(w_vel, w_vel));
+        h0 = hh0 * size * len * dt;
+        h1 = hh1 * size * dt;
+#endif
+
+        w_pos = w_pos + h0;
     }
     else
     {
@@ -1703,7 +1713,7 @@ Particle_System load_particle_system(const char *filename)
     const char *file_end = file_str + file_len;
     const char *p = file_str;
 
-    enum { EMITTER_ATTRIBUTE_NUM = 9, PARTICLE_ATTRIBUTE_NUM = 3 };
+    enum { EMITTER_ATTRIBUTE_NUM = 10, PARTICLE_ATTRIBUTE_NUM = 3 };
     struct {
         const char *name;
         Attribute_ValueType type;
@@ -1715,6 +1725,7 @@ Particle_System load_particle_system(const char *filename)
         {"additive", ATTR_BOOLEAN, nullptr, nullptr, &result.additive},
         {"emitter_loop", ATTR_BOOLEAN, nullptr, nullptr, &result.emitter.loop},
         {"emitter_life", ATTR_F1, &result.emitter.life, nullptr, nullptr},
+        {"emitter_cooldown", ATTR_F1, &result.emitter.cooldown, nullptr, nullptr},
         {"emitter_rate", ATTR_F1, &result.emitter.rate, &result.emitter.rate_p, nullptr},
         {"drag", ATTR_F1, &result.emitter.drag, &result.emitter.drag_p, nullptr},
         {"initial_life", ATTR_F1, &result.emitter.initial_life, &result.emitter.initial_life_p, nullptr},
@@ -1919,10 +1930,22 @@ err:
 }
 
 
-
-void mouse_wheel(float wheel, Camera *camera)
+struct MouseWheelData
 {
-    camera->zoom += wheel * 0.05f;
+    Camera *camera;
+    float *timestep;
+};
+
+void mouse_wheel(float wheel, unsigned modifiers, MouseWheelData *data)
+{
+    if (modifiers == 0)
+    {
+        data->camera->zoom += wheel * 0.05f;
+    }
+    else
+    {
+        *data->timestep += wheel * 0.05f;
+    }
 }
 
 void key_down(int key, bool *keys)
@@ -2031,13 +2054,22 @@ int main(int argc, char **argv)
     Particle_System PS3 = load_particle_system("particle_systems/simple.psys");
     Emitter_Instance E3 = new_emitter(&PS3, vec3{-2, 0, 0});
 
+    Particle_System PS4 = load_particle_system("particle_systems/explosion_sparks.psys");
+    Emitter_Instance E4 = new_emitter(&PS4, vec3{2, 0, 0});
+
     FXVM_Machine vm = fxvm_new();
 
     Camera camera = { };
     camera.zoom = 5.0f;
 
-    window.wheel_user_ptr = &camera;
-    window.mouse_wheel = (void (*)(float, void*))mouse_wheel;
+    float timestep = 1.0f;
+
+    MouseWheelData mwdata = { };
+    mwdata.camera = &camera;
+    mwdata.timestep = &timestep;
+
+    window.wheel_user_ptr = &mwdata;
+    window.mouse_wheel = (void (*)(float, unsigned, void*))mouse_wheel;
 
     bool keys[512] = { };
     set_window_key_down(&window, key_down, keys);
@@ -2102,6 +2134,11 @@ int main(int argc, char **argv)
             free_particle_system(&PS3);
             PS3 = load_particle_system("particle_systems/simple.psys");
         }
+        if (!last_L && keys['P'])
+        {
+            free_particle_system(&PS4);
+            PS4 = load_particle_system("particle_systems/explosion_sparks.psys");
+        }
         last_J = keys['J'];
         last_K = keys['K'];
         last_L = keys['L'];
@@ -2119,10 +2156,12 @@ int main(int argc, char **argv)
 
         while (time_accum >= sim_dt)
         {
+            float dt = sim_dt * timestep;
             uint64_t start_cycles = __rdtsc(), emit_cycles = 0, compact_cycles = 0;
-            simulate(&vm, &PS1, &E1, sim_dt, &emit_cycles, &compact_cycles);
-            simulate(&vm, &PS2, &E2, sim_dt, &emit_cycles, &compact_cycles);
-            simulate(&vm, &PS3, &E3, sim_dt, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS1, &E1, dt, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS2, &E2, dt, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS3, &E3, dt, &emit_cycles, &compact_cycles);
+            simulate(&vm, &PS4, &E4, dt, &emit_cycles, &compact_cycles);
             uint64_t end_cycles = __rdtsc();
 
             sim_emit_ticks = emit_cycles;
@@ -2142,6 +2181,7 @@ int main(int argc, char **argv)
         draw_to_buffer(&particle_buffer, camera, &PS1, &E1);
         draw_to_buffer(&particle_buffer, camera, &PS2, &E2);
         draw_to_buffer(&particle_buffer, camera, &PS3, &E3);
+        draw_to_buffer(&particle_buffer, camera, &PS4, &E4);
         draw(&particle_buffer, particle_tex, floor_tex, camera, window.width, window.height);
 
         //draw(camera, window.width, window.height, &PS1, &E1);
@@ -2150,9 +2190,10 @@ int main(int argc, char **argv)
 
         float fps = 1.0f / dt;
 
-        char buf[128];
-        snprintf(buf, 128, "FPS %.3f; SIM %lld cycles (%.0f) (%llu, %llu), particles alive %d",
-                fps, sim_ticks, sim_ticks_smooth, sim_emit_ticks, sim_compact_ticks, E1.particles_alive + E2.particles_alive + E3.particles_alive);
+        char buf[256];
+        snprintf(buf, 256, "FPS %6.3f; SIM %10.lld; sim cycles (tot %8.0f, emit %8.llu, compact %8.llu), particles alive %d. ts: %3.2f",
+                fps, sim_ticks, sim_ticks_smooth, sim_emit_ticks, sim_compact_ticks,
+                E1.particles_alive + E2.particles_alive + E3.particles_alive, timestep);
         set_window_title(window, buf);
 
         SwapBuffers((HDC)window.hdc);

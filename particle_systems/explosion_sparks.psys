@@ -1,5 +1,6 @@
 
-stretch = false
+stretch = true
+additive = true
 
 emitter_life = 0.20
 emitter_cooldown = 1.0
@@ -15,7 +16,7 @@ initial_life = {{
     1.0 + rand01() * 0.6;
 }}
 
-drag = 1.6
+drag = 1.2
 
 initial_position = {{
     theta = rand01() * PI * 4;
@@ -28,7 +29,7 @@ initial_position = {{
 
 initial_velocity = {{
     v = vec3(2*rand01()-1.0, 0.2+2*rand01(), 2*rand01()-1.0);
-    normalize(v) * 6;
+    normalize(v) * 6 * rand01();
 }}
 
 acceleration = {{
@@ -45,6 +46,7 @@ color = {{
 size = {{
     x = particle_random.x;
     t = particle_life;
-    0.8 + x * t;
+    10 + x * t;
 }}
+
 
