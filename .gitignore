@@ -1,1 +1,6 @@
 *.exe
+*.o
+*.a
+
+imgui.ini
+
