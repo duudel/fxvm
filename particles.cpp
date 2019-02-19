@@ -2209,8 +2209,48 @@ int main(int argc, char **argv)
         Particle_System *ps = PS[ps_index];
         ImGui::Checkbox("Additive", &ps->additive);
         ImGui::Checkbox("Stretch", &ps->stretch);
-        ImGui::SliderInt("Sheet tile X", &ps->sheet_tile_x, 0, 3);
-        ImGui::SliderInt("Sheet tile Y", &ps->sheet_tile_y, 0, 3);
+        //ImGui::SliderInt("Sheet tile X", &ps->sheet_tile_x, 0, 3);
+        //ImGui::SliderInt("Sheet tile Y", &ps->sheet_tile_y, 0, 3);
+        float tile_uv_size = 1.0f / 4.0f;
+        for (int tile_y = 0; tile_y < 4; tile_y++)
+        {
+            float v0 = tile_uv_size * tile_y;
+            float v1 = tile_uv_size * tile_y + tile_uv_size;
+            v0 = 1.0f - v0;
+            v1 = 1.0f - v1;
+            for (int tile_x = 0; tile_x < 4; tile_x++)
+            {
+                float u0 = tile_uv_size * tile_x;
+                float u1 = tile_uv_size * tile_x + tile_uv_size;
+                ImVec4 tint = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+                if (ps->sheet_tile_x == tile_x && ps->sheet_tile_y == tile_y)
+                {
+                    tint = ImVec4(0.8f,1,1,1);
+                }
+                char sheet_id[] = "XY_sheet_tile";
+                sheet_id[0] = '0' + tile_x;
+                sheet_id[1] = '0' + tile_y;
+                ImGui::PushID(sheet_id);
+                //ImGui::PushID(0x8f000 | (tile_y*4 + tile_x));
+                bool clicked = ImGui::ImageButton(
+                        /*texture =*/ (void*)(intptr_t)sheet.texture,
+                        /*size =*/ ImVec2(48.0f, 48.0f),
+                        /*uv0 =*/ ImVec2(u0,v0),
+                        /*uv1 =*/ ImVec2(u1,v1),
+                        /*frame_padding =*/ -1,
+                        /*bg_col =*/ ImVec4(0,0,0,0),
+                        /*tint_col =*/ tint);
+                //bool clicked = ImGui::Button("*", ImVec2(32.0f, 32.0f));
+                if (clicked)
+                {
+                    ps->sheet_tile_x = tile_x;
+                    ps->sheet_tile_y = tile_y;
+                }
+                ImGui::PopID();
+                ImGui::SameLine();
+            }
+            ImGui::NewLine();
+        }
         ImGui::End();
 
         LARGE_INTEGER last_counter = counter;
