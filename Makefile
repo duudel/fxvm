@@ -1,10 +1,12 @@
 
 .PHONY: build run
 
+SOURCES := particles.cpp imgui/imgui_draw.cpp imgui/imgui_widgets.cpp imgui/imgui.cpp imgui/examples/imgui_impl_opengl2.cpp
+
 build: particles.cpp
 	#g++ -O2 -ffast-math -Wall -Wextra -fno-rtti -fno-exceptions -S -o particles-main.asm particles.cpp -lopengl32 -lgdi32
 	#g++ -O2 -ffast-math -Wall -Wextra -fno-rtti -fno-exceptions -o particles-main particles.cpp -lopengl32 -lgdi32 -lFreeImage
-	g++ -Og -g -ffast-math -Wall -Wextra -fno-rtti -fno-exceptions -o particles-main particles.cpp -lopengl32 -lgdi32 -lFreeImage
+	g++ -Og -g -ffast-math -Wall -Wextra -fno-rtti -fno-exceptions -Iimgui -o particles-main $(SOURCES) -lopengl32 -lgdi32 -lFreeImage
 
 build_fxvm: main.cpp fxvm.h fxreg.h
 	g++ -Og -g -Wall -Wextra -fno-rtti -fno-exceptions -o fxvm-main main.cpp

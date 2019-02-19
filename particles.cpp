@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "gui.h"
+
+
 struct Window
 {
     void *hwnd;
@@ -97,6 +100,36 @@ LRESULT CALLBACK WindowProcedure(HWND hwnd, UINT message, WPARAM wparam, LPARAM 
             window->mouse_y = my;
             window->buttons = buttons;
         } break;
+    case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN: case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN: case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
+    {
+        int button = 0;
+        if (message == WM_LBUTTONDOWN || message == WM_LBUTTONDBLCLK) { button = 0; }
+        if (message == WM_RBUTTONDOWN || message == WM_RBUTTONDBLCLK) { button = 1; }
+        if (message == WM_MBUTTONDOWN || message == WM_MBUTTONDBLCLK) { button = 2; }
+        if (message == WM_XBUTTONDOWN || message == WM_XBUTTONDBLCLK) { button = (GET_XBUTTON_WPARAM(wparam) == XBUTTON1) ? 3 : 4; }
+        //if (!ImGui::IsAnyMouseDown() && ::GetCapture() == NULL)
+        //    ::SetCapture(hwnd);
+        gui_mouse_down(button, true);
+        return 0;
+    }
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONUP:
+    case WM_XBUTTONUP:
+    {
+        int button = 0;
+        if (message == WM_LBUTTONUP) { button = 0; }
+        if (message == WM_RBUTTONUP) { button = 1; }
+        if (message == WM_MBUTTONUP) { button = 2; }
+        if (message == WM_XBUTTONUP) { button = (GET_XBUTTON_WPARAM(wparam) == XBUTTON1) ? 3 : 4; }
+        gui_mouse_down(button, false);
+        //if (!ImGui::IsAnyMouseDown() && ::GetCapture() == hwnd)
+        //    ::ReleaseCapture();
+        return 0;
+}
     case WM_SIZE:
         {
             int width = LOWORD(lparam);
@@ -1134,7 +1167,7 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
     }
 
     vec4 v_pos = transform(view_mat, vec4{w_pos.x, w_pos.y, w_pos.z, 1.0f});
-    // coordinate system => negative z is forward
+    // right hand coordinate system, where negative z is forward
     union {
         float depth_f;
         uint32_t depth_u;
@@ -1143,9 +1176,7 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
 
     // 1  8        7
     // s  eeeeeeee xxxxxxx
-    // s  eeeeee   xxxxxxx
     uint32_t depth = depth_u ^ 0xfffff000;
-    //depth = (depth & 0x80000000) | ((depth & 0x3ffff000) << 2);
     depth &= 0xffff0000;
 
     buffer->sort_key[bi] = (uint32_t)depth | (uint32_t)bi;
@@ -1869,7 +1900,7 @@ err:
 struct MouseWheelData
 {
     Camera *camera;
-    float *timestep;
+    float *time_scale;
 };
 
 void mouse_wheel(float wheel, unsigned modifiers, MouseWheelData *data)
@@ -1880,7 +1911,7 @@ void mouse_wheel(float wheel, unsigned modifiers, MouseWheelData *data)
     }
     else
     {
-        *data->timestep += wheel * 0.05f;
+        *data->time_scale += wheel * 0.05f;
     }
 }
 
@@ -2042,6 +2073,8 @@ int main(int argc, char **argv)
     Window window = { };
     create_window(1000, 800, &window);
 
+    gui_init((HWND)window.hwnd);
+
     // After GL context is created
     glGenerateMipmap = (void (*)(GLenum))(void*)wglGetProcAddress("glGenerateMipmap");
 
@@ -2071,11 +2104,11 @@ int main(int argc, char **argv)
     Camera camera = { };
     camera.zoom = 5.0f;
 
-    float timestep = 1.0f;
+    float time_scale = 1.0f;
 
     MouseWheelData mwdata = { };
     mwdata.camera = &camera;
-    mwdata.timestep = &timestep;
+    mwdata.time_scale = &time_scale;
 
     window.wheel_user_ptr = &mwdata;
     window.mouse_wheel = (void (*)(float, unsigned, void*))mouse_wheel;
@@ -2106,9 +2139,17 @@ int main(int argc, char **argv)
 
     Particle_DrawBuffer particle_buffer = { };
 
-    bool last_J = false;
-    bool last_K = false;
-    bool last_L = false;
+    bool last_R = false;
+
+    int max_particle_systems = 4;
+    Particle_System *PS[] = {
+        &PS1,
+        &PS2,
+        &PS3,
+        &PS4,
+    };
+
+    int ps_index = 0;
 
     MSG msg = { };
     while (window.running)
@@ -2119,38 +2160,58 @@ int main(int argc, char **argv)
             DispatchMessage(&msg);
         }
 
-        if (window.buttons & MK_LBUTTON)
+        if (!gui_want_capture_mouse())
         {
-            int delta_x = window.mouse_x - window.last_mouse_x;
-            int delta_y = window.mouse_y - window.last_mouse_y;
-            move_camera(&camera, delta_x, delta_y);
+            if (window.buttons & MK_LBUTTON)
+            {
+                int delta_x = window.mouse_x - window.last_mouse_x;
+                int delta_y = window.mouse_y - window.last_mouse_y;
+                move_camera(&camera, delta_x, delta_y);
+            }
         }
         window.last_mouse_x = window.mouse_x;
         window.last_mouse_y = window.mouse_y;
 
-        if (!last_J && keys['J'])
+        gui_new_frame((HWND)window.hwnd, window.width, window.height);
+
+        if (!last_R && keys['R'])
         {
             free_particle_system(&PS1);
-            PS1 = load_particle_system("particle_systems/example.psys");
-        }
-        if (!last_K && keys['K'])
-        {
             free_particle_system(&PS2);
-            PS2 = load_particle_system("particle_systems/explosion.psys");
-        }
-        if (!last_L && keys['L'])
-        {
             free_particle_system(&PS3);
-            PS3 = load_particle_system("particle_systems/simple.psys");
-        }
-        if (!last_L && keys['P'])
-        {
             free_particle_system(&PS4);
+            PS1 = load_particle_system("particle_systems/example.psys");
+            PS2 = load_particle_system("particle_systems/explosion.psys");
+            PS3 = load_particle_system("particle_systems/simple.psys");
             PS4 = load_particle_system("particle_systems/explosion_sparks.psys");
         }
-        last_J = keys['J'];
-        last_K = keys['K'];
-        last_L = keys['L'];
+        last_R = keys['R'];
+
+        ImGui::Begin("Settings");
+        ImGui::Text("Simulation");
+        ImGui::SliderFloat("Time scale", &time_scale, 0.0f, 5.0f);
+        ImGui::Separator();
+        ImGui::Text("Particle Systems");
+        if (ImGui::Button("Reload"))
+        {
+            free_particle_system(&PS1);
+            free_particle_system(&PS2);
+            free_particle_system(&PS3);
+            free_particle_system(&PS4);
+            PS1 = load_particle_system("particle_systems/example.psys");
+            PS2 = load_particle_system("particle_systems/explosion.psys");
+            PS3 = load_particle_system("particle_systems/simple.psys");
+            PS4 = load_particle_system("particle_systems/explosion_sparks.psys");
+        }
+        ImGui::SliderInt("Selected", &ps_index, 0, max_particle_systems - 1);
+        ImGui::Separator();
+        ImGui::Text("System settings");
+        Particle_System *ps = PS[ps_index];
+        ImGui::Checkbox("Additive", &ps->additive);
+        ImGui::Checkbox("Stretch", &ps->stretch);
+        ImGui::SliderInt("Sheet tile X", &ps->sheet_tile_x, 0, 3);
+        ImGui::SliderInt("Sheet tile Y", &ps->sheet_tile_y, 0, 3);
+        ImGui::End();
 
         LARGE_INTEGER last_counter = counter;
         QueryPerformanceCounter(&counter);
@@ -2165,7 +2226,7 @@ int main(int argc, char **argv)
 
         while (time_accum >= sim_dt)
         {
-            float dt = sim_dt * timestep;
+            float dt = sim_dt * time_scale;
             uint64_t start_cycles = __rdtsc(), emit_cycles = 0, compact_cycles = 0;
             simulate(&vm, &PS1, &E1, dt, &emit_cycles, &compact_cycles);
             simulate(&vm, &PS2, &E2, dt, &emit_cycles, &compact_cycles);
@@ -2202,8 +2263,17 @@ int main(int argc, char **argv)
         char buf[256];
         snprintf(buf, 256, "FPS %6.3f; SIM %10.lld; sim cycles (tot %8.0f, emit %8.llu, compact %8.llu), particles alive %d. ts: %3.2f",
                 fps, sim_ticks, sim_ticks_smooth, sim_emit_ticks, sim_compact_ticks,
-                E1.particles_alive + E2.particles_alive + E3.particles_alive, timestep);
+                E1.particles_alive + E2.particles_alive + E3.particles_alive, time_scale);
         set_window_title(window, buf);
+
+        ImGui::Render();
+        glViewport(0, 0, window.width, window.height);
+
+        //GLint last_program;
+        //glGetIntegerv(GL_CURRENT_PROGRAM, &last_program);
+        //glUseProgram(0);
+        ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+        //glUseProgram(last_program);
 
         SwapBuffers((HDC)window.hdc);
     }
@@ -2215,6 +2285,8 @@ int main(int argc, char **argv)
 
     printf("avg ticks\t smooth\t avg particle\t avg ticks per particle\n");
     printf("%.0f\t %0.f\t  %.3f\t %.3f\n", sim_ticks_avg, sim_ticks_smooth, avg_particles, avg_ticks_per_particle);
+
+    gui_deinit();
 
     wglMakeCurrent((HDC)window.hdc, nullptr);
     wglDeleteContext((HGLRC)window.glrc);
