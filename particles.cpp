@@ -276,6 +276,10 @@ vec3 cross(vec3 a, vec3 b)
 vec3 normalize(vec3 a)
 {
     float L2 = dot(a, a);
+    if (L2 <= 0.001f)
+    {
+        return vec3{1.0f, 0.0f, 0.0f};
+    }
     float L = sqrt(L2);
     return a / L;
 }
@@ -326,6 +330,10 @@ vec3 cross(vec3 a, vec3 b)
 vec3 normalize(vec3 a)
 {
     float L2 = dot(a, a);
+    if (L2 <= 0.001f)
+    {
+        return vec3{ 1.0f, 0.0f, 0.0f };
+    }
     __m128 L = _mm_rsqrt_ps(_mm_set1_ps(L2));
     return vec3{ .v4 = _mm_mul_ps(a.v4, L) };
 }
@@ -457,6 +465,21 @@ mat4 Perspective_lh(float fov_y, float aspect_ratio, float near, float far)
     return PerspectiveOffCenter_lh(-x, x, -y, y, near, far);
 }
 
+mat4 invert_affine(mat4 m)
+{
+    vec3 inv_rot_0 = vec3{m[0], m[4], m[8]};
+    vec3 inv_rot_1 = vec3{m[1], m[5], m[9]};
+    vec3 inv_rot_2 = vec3{m[2], m[6], m[10]};
+    vec3 x = vec3{m[3], m[7], m[11]};
+    vec3 v = -vec3{dot(inv_rot_0, x), dot(inv_rot_1, x), dot(inv_rot_2, x)};
+    return {
+        inv_rot_0.x, inv_rot_0.y, inv_rot_0.z, v.x,
+        inv_rot_1.x, inv_rot_1.y, inv_rot_1.z, v.y,
+        inv_rot_2.x, inv_rot_2.y, inv_rot_2.z, v.z,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+}
+
 vec4 transform(mat4 tr, vec4 p)
 {
     // | 0  1  2  3|   |x|
@@ -527,6 +550,8 @@ struct Particle_System
     Emitter_Parameters emitter;
     bool stretch;
     bool additive;
+    bool align_to_axis;
+    vec3 align_axis;
     int sheet_tile_x;
     int sheet_tile_y;
 
@@ -843,19 +868,24 @@ struct Camera
     float zoom;
 };
 
+mat4 camera_matrix(Camera camera)
+{
+    vec3 X = vec3{0, -2.0, -1.0f * camera.zoom};
+    return
+        translation(X) *
+        rotation_x(-camera.rotation.x-0.5) *
+        rotation_y(-camera.rotation.y)
+        ;
+}
+
 void move_camera(Camera *camera, int delta_x, int delta_y)
 {
     camera->rotation.y += (float)delta_x * 0.015f;
     camera->rotation.x += (float)delta_y * 0.015f;
-}
 
-mat4 camera_matrix(Camera camera)
-{
-    return
-        translation(vec3{0, -2.0, -1.0f * camera.zoom}) *
-        rotation_x(-camera.rotation.x-0.5) *
-        rotation_y(-camera.rotation.y)
-        ;
+    mat4 V = camera_matrix(*camera);
+    vec4 pos = transform(V, vec4{0,0,0,1});
+    camera->position = vec3{pos.x,pos.y,pos.z};
 }
 
 #define FXVM_COMPILER_IMPL
@@ -1101,10 +1131,15 @@ int add_particle_buffer_particle(Particle_DrawBuffer *buffer)
     return i;
 }
 
-void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, int i,
-        mat4 view_mat, vec3 right, vec3 up, vec3 look,
-        bool stretch, bool additive, int tile_x, int tile_y)
+void emit_particle_buffer_particle(Particle_DrawBuffer *buffer,
+        Particle_System *PS, Particles *P, int i,
+        vec3 cam_pos, mat4 view_mat, vec3 right, vec3 up, vec3 look)
 {
+    bool stretch = PS->stretch;
+    bool additive = PS->additive;
+    int tile_x = PS->sheet_tile_x;
+    int tile_y = PS->sheet_tile_y;
+
     int bi = add_particle_buffer_particle(buffer);
 
     float size = P->size[i] * 0.5f;
@@ -1160,6 +1195,16 @@ void emit_particle_buffer_particle(Particle_DrawBuffer *buffer, Particles *P, in
 
         w_pos = w_pos + h0;
     }
+    else if (PS->align_to_axis)
+    {
+        up = PS->align_axis;
+        vec3 v = normalize(w_pos - cam_pos);
+        right = normalize(cross(up, v));
+        //right = normalize(cross(up, normalize(w_pos - cam_pos)));
+
+        h0 = right * size;
+        h1 = up * size;
+    }
     else
     {
         h0 = right * size;
@@ -1193,16 +1238,17 @@ void draw_to_buffer(Particle_DrawBuffer *buffer, Camera camera, Particle_System 
     Particles *P = &E->P;
 
     mat4 view_mat = camera_matrix(camera);
+    //vec3 cam_pos = {view_mat[3], view_mat[7], view_mat[11]};
+    mat4 camera_w = invert_affine(view_mat);
+    vec3 cam_pos = {camera_w[3], camera_w[7], camera_w[11]};
     vec3 right = {view_mat[0], view_mat[1], view_mat[2]};
     vec3 up = {view_mat[4], view_mat[5], view_mat[6]};
     vec3 look = {view_mat[8], view_mat[9], view_mat[10]};
 
     for (int i = 0; i < E->particles_alive; i++)
     {
-        emit_particle_buffer_particle(buffer, P, i,
-                view_mat, right, up, look,
-                PS->stretch, PS->additive,
-                PS->sheet_tile_x, PS->sheet_tile_y);
+        emit_particle_buffer_particle(buffer, PS, P, i,
+                cam_pos, view_mat, right, up, look);
     }
 }
 
@@ -1339,6 +1385,7 @@ void draw(Particle_DrawBuffer *buffer, ParticleSheet particle_sheet, GLuint floo
     glLoadMatrixf(camera_proj.m);
 
     mat4 view_mat = camera_matrix(camera);
+    //mat4 camera_w = invert_affine(view_mat);
     view_mat = transpose(view_mat);
     glMatrixMode(GL_MODELVIEW);
     glLoadMatrixf(view_mat.m);
@@ -2209,6 +2256,14 @@ int main(int argc, char **argv)
         Particle_System *ps = PS[ps_index];
         ImGui::Checkbox("Additive", &ps->additive);
         ImGui::Checkbox("Stretch", &ps->stretch);
+        ImGui::Checkbox("Align to axis", &ps->align_to_axis);
+        if (ps->align_to_axis)
+        {
+            ImGui::Indent();
+            ImGui::SliderFloat3("Axis", &ps->align_axis.x, -1.0f, 1.0f);
+            ImGui::Unindent();
+            ps->align_axis = normalize(ps->align_axis);
+        }
         //ImGui::SliderInt("Sheet tile X", &ps->sheet_tile_x, 0, 3);
         //ImGui::SliderInt("Sheet tile Y", &ps->sheet_tile_y, 0, 3);
         float tile_uv_size = 1.0f / 4.0f;
